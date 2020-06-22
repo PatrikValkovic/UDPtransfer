@@ -14,9 +14,9 @@ fn main() -> std::io::Result<()> {
         println!("File {} opened", config.filename());
     }
 
-    let socket = UdpSocket::bind(config.binding()).expect("Can't bind socket");
+    let socket = UdpSocket::bind(config.bind_addr()).expect("Can't bind socket");
     if config.is_verbose() {
-        println!("Socket bind to {}", config.binding());
+        println!("Socket bind to {}", config.bind_addr());
     }
 
     let mut buff = Vec::new();
@@ -24,12 +24,12 @@ fn main() -> std::io::Result<()> {
     let send_addr = config.send_addr();
 
     while let Ok(size) = input_file.read(buff.as_mut_slice()) {
-        if size == 0 {
-            break;
-        }
-
         if config.is_verbose() {
             println!("Read {}b of data from file.", size);
+        }
+
+        if size == 0 {
+            break;
         }
 
         let sent = socket.send_to(&buff.as_slice()[..size], send_addr)?;
