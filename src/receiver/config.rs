@@ -13,7 +13,7 @@ impl Config {
     pub fn new() -> Self {
         return Config {
             verbose: false,
-            bindaddr: String::from("127.0.0.1:3002"),
+            bindaddr: String::from("127.0.0.1:3003"),
             file: String::from("output.txt"),
             packet_size: 1500,
         };

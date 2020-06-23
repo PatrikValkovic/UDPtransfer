@@ -17,3 +17,7 @@ path="src/receiver/main.rs"
 [[bin]]
 name="sender"
 path="src/sender/main.rs"
+
+[[bin]]
+name="broker"
+path="src/broker/main.rs"
