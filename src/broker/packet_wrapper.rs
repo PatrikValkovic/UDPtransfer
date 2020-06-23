@@ -23,7 +23,7 @@ impl PacketWrapper {
             return Duration::from_millis(0);
         }
     }
-    
+
     pub fn content(&self) -> &Vec<u8> {
         return &self.content;
     }

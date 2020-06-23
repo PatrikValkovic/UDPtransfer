@@ -1,5 +1,5 @@
 [package]
-name = "guess_game"
+name = "udp_transfer"
 version = "0.1.0"
 authors = ["Patrik Valkovic <patrik.valkovic@hotmail.cz>"]
 edition = "2018"
@@ -9,6 +9,7 @@ edition = "2018"
 [dependencies]
 rand = "0.7.3"
 argparse = "0.2.2"
+byteorder = "1.3.4"
 
 [[bin]]
 name="receiver"

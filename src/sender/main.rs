@@ -1,10 +1,12 @@
 mod config;
 
-use config::Config;
-use std::net::{UdpSocket};
+use std::net::{UdpSocket, SocketAddrV4};
 use std::fs::File;
 use std::result::Result::Ok;
 use std::io::Read;
+
+use config::Config;
+use udp_transfer::packet::Packet;
 
 fn main() -> std::io::Result<()> {
     let config = Config::from_command_line();
@@ -18,6 +20,9 @@ fn main() -> std::io::Result<()> {
     if config.is_verbose() {
         println!("Socket bind to {}", config.bind_addr());
     }
+    let addr = config.send_addr();
+
+    start_communication(&socket, &addr);
 
     let mut buff = Vec::new();
     buff.resize(config.max_packet_size() as usize, 0);
@@ -39,4 +44,8 @@ fn main() -> std::io::Result<()> {
     }
 
     return Ok(());
+}
+
+fn start_communication(socket: &UdpSocket, addr: &SocketAddrV4) {
+
 }
