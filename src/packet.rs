@@ -1,6 +1,20 @@
 use std::vec::Vec;
 use byteorder::{NetworkEndian, ByteOrder};
-use crate::transferable::Transferable;
+
+trait ToBin {
+    fn bin_size(&self) -> usize;
+
+    fn to_bin_buff(&self, buff: &mut [u8]);
+
+    fn to_bin(&self) -> Vec<u8> {
+        let mut vect = vec![0; self.bin_size()];
+        self.to_bin_buff(vect.as_mut_slice());
+        return vect;
+    }
+
+    fn from_bin(memory: &[u8]) -> Self;
+}
+
 
 #[derive(Debug, PartialEq)]
 pub enum Flag {
@@ -11,7 +25,7 @@ pub enum Flag {
     End,
 }
 
-impl Transferable for Flag {
+impl ToBin for Flag {
     fn bin_size(&self) -> usize {
         return 1;
     }
@@ -36,6 +50,7 @@ impl Transferable for Flag {
 }
 
 
+#[derive(Debug)]
 pub struct PacketHeader {
     pub id: u32,
     pub seq: u16,
@@ -43,9 +58,9 @@ pub struct PacketHeader {
     pub flag: Flag,
 }
 
-impl Transferable for PacketHeader {
+impl ToBin for PacketHeader {
     fn bin_size(&self) -> usize {
-        return 9;
+        Self::bin_size()
     }
 
     fn to_bin_buff(&self, buff: &mut [u8]) {
@@ -69,7 +84,17 @@ impl Transferable for PacketHeader {
     }
 }
 
+impl PacketHeader {
+    pub fn bin_size() -> usize {
+        return 9;
+    }
+    pub fn flag_position() -> usize {
+        return 8;
+    }
+}
 
+
+#[derive(Debug)]
 pub struct InitPacket {
     pub header: PacketHeader,
     pub window_size: u16,
@@ -77,7 +102,7 @@ pub struct InitPacket {
     pub checksum_size: u16,
 }
 
-impl Transferable for InitPacket {
+impl ToBin for InitPacket {
     fn bin_size(&self) -> usize {
         debug_assert!(self.header.bin_size() + 6 < self.packet_size as usize);
         return self.packet_size as usize;
@@ -104,14 +129,6 @@ impl Transferable for InitPacket {
         let window_size = NetworkEndian::read_u16(&memory[header_size..header_size + 2]);
         let packet_size = NetworkEndian::read_u16(&memory[header_size + 2..header_size + 4]);
         let checksum_size = NetworkEndian::read_u16(&memory[header_size + 4..header_size + 6]);
-        debug_assert!(memory.len() == packet_size as usize);
-
-        let checksum = construct_checksum(&memory[..(packet_size - checksum_size) as usize], checksum_size as usize);
-        let mut checksum_read = vec![0; checksum_size as usize];
-        checksum_read.as_mut_slice().copy_from_slice(&memory[(packet_size - checksum_size) as usize..]);
-        if !check_checksum(&checksum, &checksum_read) {
-            panic!("Checksums do not match"); //TODO handle
-        }
 
         return InitPacket {
             header,
@@ -133,19 +150,25 @@ impl InitPacket {
             },
             window_size,
             packet_size,
-            checksum_size
+            checksum_size,
         };
     }
 }
 
+impl From<(u16, u16, u16)> for InitPacket {
+    fn from((window_size, packet_size, checksum_size): (u16, u16, u16)) -> Self {
+        Self::new(window_size, packet_size, checksum_size)
+    }
+}
 
+
+#[derive(Debug)]
 pub struct DataPacket {
     pub header: PacketHeader,
     pub data: Vec<u8>,
 }
 
-impl /*Transferable for*/ DataPacket {
-    //don't know checksum size, so can't create full packet
+impl ToBin for DataPacket {
     fn bin_size(&self) -> usize {
         return self.header.bin_size() + self.data.len();
     }
@@ -175,45 +198,149 @@ impl DataPacket {
                 id: connection_id,
                 seq,
                 ack,
-                flag: Flag::Data
+                flag: Flag::Data,
             },
             data,
         };
     }
+}
 
-    pub fn from(data: &[u8], checksum_size: usize) -> Result<Self, &str> {
-        let len = data.len();
-        if len < 9 + checksum_size {
-            return Err("Not enough data received"); //TODO handle
-        }
-        let data_end = len - checksum_size;
-
-        if checksum_size > 0 {
-            let checksum_data = Vec::from(&data[len - checksum_size..len]);
-            let checksum = construct_checksum(&data[..data_end], checksum_size);
-            if check_checksum(&checksum_data, &checksum) {
-                return Err("Checksum doesn't match"); //TODO handle
-            }
-        }
-        return Ok(DataPacket::from_bin(&data[..data_end]));
-    }
-
-    pub fn to_bin_with_checksum(&self, checksum_size: usize, buff: &mut [u8]) -> usize {
-        let header_size = self.header.bin_size();
-        let packet_size = header_size + self.data.len() + checksum_size;
-        let data_end = self.header.bin_size() + self.data.len();
-        debug_assert!(buff.len() >= packet_size);
-
-        self.to_bin_buff(&mut buff[..data_end]);
-
-        if checksum_size > 0 {
-            let checksum = construct_checksum(&buff[..data_end], checksum_size);
-            buff[data_end..].copy_from_slice(checksum.as_slice());
-        }
-
-        return packet_size;
+impl From<(&[u8], usize)> for DataPacket {
+    fn from((data, checksum_size): (&[u8], usize)) -> Self {
+        return DataPacket::from_bin(&data[..data.len() - checksum_size]);
     }
 }
+
+impl From<(Vec<u8>, u32, u16, u16)> for DataPacket {
+    fn from((data, connection_id, seq, ack): (Vec<u8>, u32, u16, u16)) -> Self {
+        Self::new(data, connection_id, seq, ack)
+    }
+}
+
+
+#[derive(Debug)]
+pub struct ErrorPacket {
+    header: PacketHeader,
+}
+
+impl ToBin for ErrorPacket {
+    fn bin_size(&self) -> usize {
+        return self.header.bin_size();
+    }
+
+    fn to_bin_buff(&self, buff: &mut [u8]) {
+        return self.header.to_bin_buff(buff);
+    }
+
+    fn from_bin(memory: &[u8]) -> Self {
+        return Self {
+            header: PacketHeader::from_bin(memory),
+        };
+    }
+}
+
+impl ErrorPacket {
+    pub fn new(connection_id: u32) -> Self {
+        return Self {
+            header: PacketHeader {
+                id: connection_id,
+                seq: 0,
+                ack: 0,
+                flag: Flag::Error,
+            },
+        };
+    }
+}
+
+impl From<u32> for ErrorPacket {
+    fn from(connection_id: u32) -> Self {
+        return Self::new(connection_id);
+    }
+}
+
+
+#[derive(Debug)]
+pub struct EndPacket {
+    header: PacketHeader,
+}
+
+impl ToBin for EndPacket {
+    fn bin_size(&self) -> usize {
+        return self.header.bin_size();
+    }
+
+    fn to_bin_buff(&self, buff: &mut [u8]) {
+        return self.header.to_bin_buff(buff);
+    }
+
+    fn from_bin(memory: &[u8]) -> Self {
+        return Self {
+            header: PacketHeader::from_bin(memory),
+        };
+    }
+}
+
+impl EndPacket {
+    pub fn new(connection_id: u32, seq_num: u16) -> Self {
+        return Self {
+            header: PacketHeader {
+                id: connection_id,
+                seq: seq_num,
+                ack: seq_num,
+                flag: Flag::End,
+            },
+        };
+    }
+}
+
+impl From<(u32, u16)> for EndPacket {
+    fn from((connection_id, seq_num): (u32, u16)) -> Self {
+        return Self::new(connection_id, seq_num);
+    }
+}
+
+
+#[derive(Debug)]
+pub enum Packet {
+    Init(InitPacket),
+    Data(DataPacket),
+    Error(ErrorPacket),
+    End(EndPacket),
+}
+
+impl ToBin for Packet {
+    fn bin_size(&self) -> usize {
+        match self {
+            Self::Init(x) => x.bin_size(),
+            Self::Data(x) => x.bin_size(),
+            Self::Error(x) => x.bin_size(),
+            Self::End(x) => x.bin_size(),
+        }
+    }
+
+    fn to_bin_buff(&self, buff: &mut [u8]) {
+        match self {
+            Self::Init(x) => x.to_bin_buff(buff),
+            Self::Data(x) => x.to_bin_buff(buff),
+            Self::Error(x) => x.to_bin_buff(buff),
+            Self::End(x) => x.to_bin_buff(buff),
+        }
+    }
+
+    fn from_bin(memory: &[u8]) -> Self {
+        let flag_pos = PacketHeader::flag_position();
+        let flag = Flag::from_bin(&memory[flag_pos..flag_pos + 1]);
+        match flag {
+            Flag::Init => Self::Init(InitPacket::from_bin(memory)),
+            Flag::Error => Self::Error(ErrorPacket::from_bin(memory)),
+            Flag::End => Self::End(EndPacket::from_bin(memory)),
+            Flag::Data => Self::Data(DataPacket::from_bin(memory)),
+            Flag::None => panic!("Received invalid flag"), //TODO better
+        }
+    }
+}
+
+//TODO implement rest of method for Packet
 
 
 fn num_blocks(data: usize, checksum_size: usize) -> usize {
@@ -240,22 +367,63 @@ fn construct_checksum(data: &[u8], checksum_size: usize) -> Vec<u8> {
     return checksum;
 }
 
-fn check_checksum(first: &Vec<u8>, second: &Vec<u8>) -> bool {
+fn checksums_match(first: &[u8], second: &[u8]) -> bool {
     if let Some(_) = first.iter()
         .zip(second.iter())
         .find(|(&comp, &inside)| { comp != inside }) {
-        return true;
-    } else {
         return false;
+    } else {
+        return true;
     }
+}
+
+fn from_bin_checksum<T>(memory: &[u8], checksum: usize) -> T
+    where T: ToBin {
+    if checksum + PacketHeader::bin_size() > memory.len() {
+        panic!("Not enough data received") //TODO better
+    }
+
+    let checksum_start = memory.len() - checksum;
+    if checksum > 0 {
+        let orig_checksum = Vec::from(&memory[checksum_start..]);
+        let comp_checksum = construct_checksum(&memory[..checksum_start], checksum);
+        if !checksums_match(&orig_checksum, &comp_checksum) {
+            panic!("Checksum doesn't match") //TODO better
+        }
+    }
+    return T::from_bin(&memory[..checksum_start]);
+}
+
+fn to_bin_buff_checksum<T>(obj: &T, memory: &mut [u8], checksum: usize) -> usize
+    where T: ToBin
+{
+    let data_end = obj.bin_size();
+    let packet_size = data_end + checksum;
+    debug_assert!(memory.len() >= packet_size);
+
+    obj.to_bin_buff(&mut memory[..data_end]);
+
+    if checksum > 0 {
+        let checksum = construct_checksum(&memory[..data_end], checksum);
+        memory[data_end..].copy_from_slice(checksum.as_slice());
+    }
+
+    return packet_size;
+}
+
+fn to_bin_checksum<T>(obj: &T, checksum: usize) -> Vec<u8>
+    where T: ToBin
+{
+    let mut memory = vec![0; obj.bin_size() + checksum];
+    to_bin_buff_checksum(obj, &mut memory, checksum);
+    return memory;
 }
 
 
 #[cfg(test)]
 mod tests {
     mod new {
-        use crate::packet::DataPacket;
-        use crate::packet::Flag;
+        use crate::packet::{DataPacket, Flag, from_bin_checksum};
 
         #[test]
         fn should_parse_successfully() {
@@ -268,7 +436,7 @@ mod tests {
                 4, 5, 6, 7, //data
                 4 ^ 4, 5 ^ 1 ^ 5, 1 ^ 2 ^ 6, 8 ^ 3 ^ 7
             ];
-            let packet = DataPacket::from(&data.as_slice(), 4).unwrap();
+            let packet = from_bin_checksum::<DataPacket>(&data.as_slice(), 4);
             assert_eq!(packet.header.id, 1 << 8);
             assert_eq!(packet.header.seq, 5);
             assert_eq!(packet.header.ack, 8);
@@ -288,7 +456,7 @@ mod tests {
                 11, 13, 17, //data
                 4 ^ 4 ^ 11, 5 ^ 1 ^ 5 ^ 13, 1 ^ 2 ^ 6 ^ 17, 8 ^ 3 ^ 7
             ];
-            let packet = DataPacket::from(&data.as_slice(), 4).unwrap();
+            let packet = from_bin_checksum::<DataPacket>(&data.as_slice(), 4);
             assert_eq!(packet.header.id, 1 << 8);
             assert_eq!(packet.header.seq, 5);
             assert_eq!(packet.header.ack, 8);
@@ -297,6 +465,7 @@ mod tests {
         }
 
         #[test]
+        #[should_panic(expected = "Checksum doesn't match")]
         fn checksum_not_match() {
             let data: Vec<u8> = vec![
                 0, 0, 1, 0, //id
@@ -307,11 +476,11 @@ mod tests {
                 4, 5, 6, 7, //data
                 4 ^ 4, 5 ^ 1 ^ 5, /*1 ^*/ 2 ^ 6, 8 ^ 3 ^ 7
             ];
-            let packet = DataPacket::from(&data.as_slice(), 4).err().unwrap();
-            assert_eq!("Checksum doesn't match", packet);
+            let packet = from_bin_checksum::<DataPacket>(&data.as_slice(), 4);
         }
 
         #[test]
+        #[should_panic(expected = "Checksum doesn't match")]
         fn data_not_match() {
             let data: Vec<u8> = vec![
                 0, 0, 1, 0, //id
@@ -322,11 +491,11 @@ mod tests {
                 4, 5, 6, 7, //data
                 4 ^ 4, 5 ^ 1 ^ 5, 1 ^ 2 ^ 6, 8 ^ 3 ^ 7
             ];
-            let packet = DataPacket::from(&data.as_slice(), 4).err().unwrap();
-            assert_eq!("Checksum doesn't match", packet);
+            let packet = from_bin_checksum::<DataPacket>(&data.as_slice(), 4);
         }
 
         #[test]
+        #[should_panic(expected = "Not enough data received")]
         fn data_too_short() {
             let data: Vec<u8> = vec![
                 0, 0, 1, 0, //id
@@ -336,8 +505,7 @@ mod tests {
                 // no data
                 4 ^ 4, 5 ^ 1 ^ 5, 1 ^ 2 ^ 6/*, 8 ^ 3 ^ 7*/
             ];
-            let packet = DataPacket::from(&data.as_slice(), 4).err().unwrap();
-            assert_eq!("Not enough data received", packet);
+            let packet = from_bin_checksum::<DataPacket>(&data.as_slice(), 4);
         }
 
         #[test]
@@ -350,7 +518,7 @@ mod tests {
                 1, 2, 3, //data
                 4, 5, 6, //data
             ];
-            let packet = DataPacket::from(&data.as_slice(), 0).unwrap();
+            let packet = from_bin_checksum::<DataPacket>(&data.as_slice(), 0);
             assert_eq!(packet.header.id, 1 << 8);
             assert_eq!(packet.header.seq, 5);
             assert_eq!(packet.header.ack, 8);
@@ -360,9 +528,7 @@ mod tests {
     }
 
     mod to_binary {
-        use crate::packet::DataPacket;
-        use crate::packet::PacketHeader;
-        use crate::packet::Flag;
+        use crate::packet::{DataPacket, PacketHeader, Flag, to_bin_checksum, to_bin_buff_checksum};
 
         #[test]
         fn valid_transfer() {
@@ -376,7 +542,7 @@ mod tests {
                 data: vec![1, 2, 3, 4, 5, 6, 7],
             };
             let mut actual = vec![0; 20];
-            let wrote = packet.to_bin_with_checksum(4, &mut actual);
+            let wrote = to_bin_buff_checksum(&packet, &mut actual, 4);
             let expected: Vec<u8> = vec![
                 0, 0, 1, 0, //id
                 0, 5, //seq
@@ -402,7 +568,7 @@ mod tests {
                 data: vec![1, 2, 3, 4, 5, 6, 7, 11, 13, 17],
             };
             let mut actual = vec![0; 23];
-            let wrote = packet.to_bin_with_checksum(4, &mut actual);
+            let wrote = to_bin_buff_checksum(&packet, &mut actual, 4);
             let expected: Vec<u8> = vec![
                 0, 0, 1, 0, //id
                 0, 5, //seq
@@ -429,7 +595,7 @@ mod tests {
                 data: vec![1, 2, 3, 4, 5, 6, 7, 11, 13, 17],
             };
             let mut actual = vec![0; 19];
-            let wrote = packet.to_bin_with_checksum(0, &mut actual);
+            let wrote = to_bin_buff_checksum(&packet, &mut actual, 0);
             let expected: Vec<u8> = vec![
                 0, 0, 1, 0, //id
                 0, 5, //seq
@@ -445,7 +611,7 @@ mod tests {
     }
 
     mod flag_deserialization {
-        use crate::packet::DataPacket;
+        use crate::packet::{DataPacket, from_bin_checksum};
         use crate::packet::Flag;
 
         #[test]
@@ -459,7 +625,7 @@ mod tests {
                 4, 5, 6, 7, //data
                 7 ^ 4, 5 ^ 1 ^ 5, 1 ^ 2 ^ 6, 8 ^ 3 ^ 7
             ];
-            let packet = DataPacket::from(&data.as_slice(), 4).unwrap();
+            let packet = from_bin_checksum::<DataPacket>(&data.as_slice(), 4);
             assert_eq!(packet.header.id, 1 << 8);
             assert_eq!(packet.header.seq, 5);
             assert_eq!(packet.header.ack, 8);
