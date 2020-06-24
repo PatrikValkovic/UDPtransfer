@@ -6,7 +6,6 @@ use std::result::Result::Ok;
 use std::io::Read;
 
 use config::Config;
-use udp_transfer::packet::Packet;
 
 fn main() -> std::io::Result<()> {
     let config = Config::from_command_line();
