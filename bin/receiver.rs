@@ -1,10 +1,9 @@
-mod config;
-
-use config::Config;
 use std::net::{UdpSocket};
 use std::fs::File;
 use std::result::Result::Ok;
 use std::io::Write;
+
+use udp_transfer::receiver::config::Config;
 
 fn main() -> std::io::Result<()> {
     let config = Config::from_command_line();

@@ -1,308 +1,5 @@
-use std::vec::Vec;
-use byteorder::{NetworkEndian, ByteOrder};
-
-#[derive(Debug)]
-pub enum ParsingError {
-    InvalidSize(usize, usize),
-    ChecksumNotMatch,
-    InvalidFlag(u8),
-}
-
-trait ToBin: Sized {
-    fn bin_size(&self) -> usize;
-
-    fn to_bin_buff(&self, buff: &mut [u8]) -> usize;
-
-    fn to_bin(&self) -> Vec<u8> {
-        let mut vect = vec![0; self.bin_size()];
-        self.to_bin_buff(vect.as_mut_slice());
-        return vect;
-    }
-
-    fn from_bin(memory: &[u8]) -> Result<Self, ParsingError>;
-}
-
-
-#[derive(Debug, PartialEq)]
-pub enum Flag {
-    None,
-    Init,
-    Data,
-    Error,
-    End,
-}
-
-impl ToBin for Flag {
-    fn bin_size(&self) -> usize {
-        return 1;
-    }
-    fn to_bin_buff(&self, buff: &mut [u8]) -> usize {
-        buff[0] = match self {
-            Flag::None => 0x0,
-            Flag::Init => 0x1,
-            Flag::Data => 0x2,
-            Flag::Error => 0x4,
-            Flag::End => 0x8,
-        };
-        return 1;
-    }
-    fn from_bin(val: &[u8]) -> Result<Self, ParsingError> {
-        Ok(match val[0] {
-            0x1 => Flag::Init,
-            0x2 => Flag::Data,
-            0x4 => Flag::Error,
-            0x8 => Flag::End,
-            _ => Flag::None,
-        })
-    }
-}
-
-
-#[derive(Debug)]
-pub struct PacketHeader {
-    pub id: u32,
-    pub seq: u16,
-    pub ack: u16,
-    pub flag: Flag,
-}
-
-impl ToBin for PacketHeader {
-    fn bin_size(&self) -> usize {
-        Self::bin_size()
-    }
-
-    fn to_bin_buff(&self, buff: &mut [u8]) -> usize {
-        NetworkEndian::write_u32(&mut buff[..4], self.id);
-        NetworkEndian::write_u16(&mut buff[4..6], self.seq);
-        NetworkEndian::write_u16(&mut buff[6..8], self.ack);
-        return 8 + self.flag.to_bin_buff(&mut buff[8..9]);
-    }
-
-    fn from_bin(memory: &[u8]) -> Result<Self, ParsingError> {
-        let id = NetworkEndian::read_u32(&memory[..4]);
-        let seq = NetworkEndian::read_u16(&memory[4..6]);
-        let ack = NetworkEndian::read_u16(&memory[6..8]);
-        let flag = Flag::from_bin(&memory[8..9]).unwrap();
-        Ok(PacketHeader {
-            id,
-            seq,
-            ack,
-            flag,
-        })
-    }
-}
-
-impl PacketHeader {
-    pub fn bin_size() -> usize {
-        return 9;
-    }
-    pub fn flag_position() -> usize {
-        return 8;
-    }
-}
-
-
-#[derive(Debug)]
-pub struct InitPacket {
-    pub header: PacketHeader,
-    pub window_size: u16,
-    pub packet_size: u16,
-    pub checksum_size: u16,
-}
-
-impl ToBin for InitPacket {
-    fn bin_size(&self) -> usize {
-        debug_assert!(self.header.bin_size() + 6 < self.packet_size as usize);
-        return self.packet_size as usize;
-    }
-
-    fn to_bin_buff(&self, buff: &mut [u8]) -> usize {
-        debug_assert!(buff.len() == self.packet_size as usize);
-        let header_size = self.header.bin_size() as usize;
-
-        let header_wrote = self.header.to_bin_buff(buff);
-        NetworkEndian::write_u16(&mut buff[header_size..header_size + 2], self.window_size);
-        NetworkEndian::write_u16(&mut buff[header_size + 2..header_size + 4], self.packet_size);
-        NetworkEndian::write_u16(&mut buff[header_size + 4..header_size + 6], self.checksum_size);
-        return header_wrote + 6;
-    }
-
-    fn from_bin(memory: &[u8]) -> Result<Self, ParsingError> {
-        let header = PacketHeader::from_bin(memory).unwrap();
-        let header_size = header.bin_size() as usize;
-        let window_size = NetworkEndian::read_u16(&memory[header_size..header_size + 2]);
-        let packet_size = NetworkEndian::read_u16(&memory[header_size + 2..header_size + 4]);
-        let checksum_size = NetworkEndian::read_u16(&memory[header_size + 4..header_size + 6]);
-
-        Ok(InitPacket {
-            header,
-            window_size,
-            packet_size,
-            checksum_size,
-        })
-    }
-}
-
-impl InitPacket {
-    pub fn new(window_size: u16, packet_size: u16, checksum_size: u16) -> Self {
-        return InitPacket {
-            header: PacketHeader {
-                id: 0,
-                seq: 0,
-                ack: 0,
-                flag: Flag::Init,
-            },
-            window_size,
-            packet_size,
-            checksum_size,
-        };
-    }
-}
-
-impl From<(u16, u16, u16)> for InitPacket {
-    fn from((window_size, packet_size, checksum_size): (u16, u16, u16)) -> Self {
-        Self::new(window_size, packet_size, checksum_size)
-    }
-}
-
-
-#[derive(Debug)]
-pub struct DataPacket {
-    pub header: PacketHeader,
-    pub data: Vec<u8>,
-}
-
-impl ToBin for DataPacket {
-    fn bin_size(&self) -> usize {
-        return self.header.bin_size() + self.data.len();
-    }
-
-    fn to_bin_buff(&self, buff: &mut [u8]) -> usize {
-        let header_size = self.header.bin_size();
-        let header_wrote = self.header.to_bin_buff(buff);
-        buff[header_size..].copy_from_slice(self.data.as_slice());
-        return header_wrote + self.data.len();
-    }
-
-    fn from_bin(memory: &[u8]) -> Result<Self, ParsingError> {
-        let header = PacketHeader::from_bin(memory).unwrap();
-        let header_size = header.bin_size();
-        let data = Vec::from(&memory[header_size..]);
-
-        Ok(Self {
-            header,
-            data,
-        })
-    }
-}
-
-impl DataPacket {
-    pub fn new(data: Vec<u8>, connection_id: u32, seq: u16, ack: u16) -> Self {
-        return DataPacket {
-            header: PacketHeader {
-                id: connection_id,
-                seq,
-                ack,
-                flag: Flag::Data,
-            },
-            data,
-        };
-    }
-}
-
-impl From<(&[u8], usize)> for DataPacket {
-    fn from((data, checksum_size): (&[u8], usize)) -> Self {
-        return DataPacket::from_bin(&data[..data.len() - checksum_size]).unwrap();
-    }
-}
-
-impl From<(Vec<u8>, u32, u16, u16)> for DataPacket {
-    fn from((data, connection_id, seq, ack): (Vec<u8>, u32, u16, u16)) -> Self {
-        Self::new(data, connection_id, seq, ack)
-    }
-}
-
-
-#[derive(Debug)]
-pub struct ErrorPacket {
-    header: PacketHeader,
-}
-
-impl ToBin for ErrorPacket {
-    fn bin_size(&self) -> usize {
-        return self.header.bin_size();
-    }
-
-    fn to_bin_buff(&self, buff: &mut [u8]) -> usize {
-        return self.header.to_bin_buff(buff);
-    }
-
-    fn from_bin(memory: &[u8]) -> Result<Self, ParsingError> {
-        Ok(Self {
-            header: PacketHeader::from_bin(memory).unwrap(),
-        })
-    }
-}
-
-impl ErrorPacket {
-    pub fn new(connection_id: u32) -> Self {
-        return Self {
-            header: PacketHeader {
-                id: connection_id,
-                seq: 0,
-                ack: 0,
-                flag: Flag::Error,
-            },
-        };
-    }
-}
-
-impl From<u32> for ErrorPacket {
-    fn from(connection_id: u32) -> Self {
-        return Self::new(connection_id);
-    }
-}
-
-
-#[derive(Debug)]
-pub struct EndPacket {
-    header: PacketHeader,
-}
-
-impl ToBin for EndPacket {
-    fn bin_size(&self) -> usize {
-        return self.header.bin_size();
-    }
-
-    fn to_bin_buff(&self, buff: &mut [u8]) -> usize {
-        return self.header.to_bin_buff(buff);
-    }
-
-    fn from_bin(memory: &[u8]) -> Result<Self, ParsingError> {
-        Ok(Self {
-            header: PacketHeader::from_bin(memory).unwrap(),
-        })
-    }
-}
-
-impl EndPacket {
-    pub fn new(connection_id: u32, seq_num: u16) -> Self {
-        return Self {
-            header: PacketHeader {
-                id: connection_id,
-                seq: seq_num,
-                ack: seq_num,
-                flag: Flag::End,
-            },
-        };
-    }
-}
-
-impl From<(u32, u16)> for EndPacket {
-    fn from((connection_id, seq_num): (u32, u16)) -> Self {
-        return Self::new(connection_id, seq_num);
-    }
-}
+use super::{ToBin, Flag, ParsingError, PacketHeader};
+use super::{InitPacket, DataPacket, ErrorPacket, EndPacket};
 
 
 #[derive(Debug)]
@@ -336,10 +33,10 @@ impl ToBin for Packet {
         let flag_pos = PacketHeader::flag_position();
         let flag = Flag::from_bin(&memory[flag_pos..flag_pos + 1]).unwrap();
         Ok(match flag {
-            Flag::Init => Self::Init(InitPacket::from_bin(memory).unwrap()),
-            Flag::Error => Self::Error(ErrorPacket::from_bin(memory).unwrap()),
-            Flag::End => Self::End(EndPacket::from_bin(memory).unwrap()),
-            Flag::Data => Self::Data(DataPacket::from_bin(memory).unwrap()),
+            Flag::Init => Self::Init(InitPacket::from_bin(memory)?),
+            Flag::Error => Self::Error(ErrorPacket::from_bin(memory)?),
+            Flag::End => Self::End(EndPacket::from_bin(memory)?),
+            Flag::Data => Self::Data(DataPacket::from_bin(memory)?),
             Flag::None => return Err(ParsingError::InvalidFlag(memory[flag_pos])),
         })
     }
@@ -375,8 +72,10 @@ impl Packet {
         if checksum + PacketHeader::bin_size() > memory.len() {
             return Err(ParsingError::InvalidSize(checksum + PacketHeader::bin_size(), memory.len()));
         }
-
         let checksum_start = memory.len() - checksum;
+
+        let package = ToBin::from_bin(&memory[..checksum_start])?;
+
         if checksum > 0 {
             let orig_checksum = Vec::from(&memory[checksum_start..]);
             let comp_checksum = construct_checksum(&memory[..checksum_start], checksum);
@@ -384,7 +83,8 @@ impl Packet {
                 return Err(ParsingError::ChecksumNotMatch);
             }
         }
-        return ToBin::from_bin(&memory[..checksum_start]);
+
+        return Ok(package);
     }
 }
 
@@ -646,26 +346,6 @@ mod tests {
             ];
             assert_eq!(wrote, expected.len());
             assert_eq!(actual, expected);
-        }
-    }
-
-    mod flag_deserialization {
-        use crate::packet::{Packet, ParsingError};
-
-        #[test]
-        fn invalid_flag() {
-            let data: Vec<u8> = vec![
-                0, 0, 1, 0, //id
-                0, 5, //seq
-                0, 8, //ack
-                7, //flag
-                1, 2, 3, //data
-                4, 5, 6, 7, //data
-                7 ^ 4, 5 ^ 1 ^ 5, 1 ^ 2 ^ 6, 8 ^ 3 ^ 7
-            ];
-            if let Err(ParsingError::InvalidFlag(7)) = Packet::from_bin(&data.as_slice(), 4) {} else {
-                panic!();
-            }
         }
     }
 }

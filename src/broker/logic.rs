@@ -1,5 +1,3 @@
-use crate::config::Config;
-use crate::packet_wrapper::PacketWrapper;
 
 use std::net::{UdpSocket, SocketAddrV4};
 use std::thread::{JoinHandle, spawn};
@@ -8,6 +6,9 @@ use std::sync::{Arc, Mutex, Condvar};
 use std::{f32, u64};
 use std::time::Duration;
 use rand::{thread_rng, Rng, distributions::Uniform};
+
+use super::config::Config;
+use super::packet_wrapper::PacketWrapper;
 
 pub fn broker(config: Config) -> () {
     let send_socket = Arc::new(UdpSocket::bind(config.sender_bind()).expect("Can't bind sender socket"));
