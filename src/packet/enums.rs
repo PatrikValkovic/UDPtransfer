@@ -1,6 +1,6 @@
 #[derive(Debug, PartialEq)]
 pub enum ParsingError {
-    InvalidSize(usize, usize),
+    InvalidSize(usize, usize), // expected, actual
     ChecksumNotMatch,
     InvalidFlag(u8),
 }

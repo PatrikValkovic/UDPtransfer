@@ -6,8 +6,8 @@ pub struct Config {
     verbose: bool,
     bindaddr: String,
     file: String,
-    packet_size: u32,
-    window_size: u16,
+    max_packet_size: u16,
+    max_window_size: u16,
     timeout: u32,
 }
 
@@ -17,8 +17,8 @@ impl Config {
             verbose: false,
             bindaddr: String::from("127.0.0.1:3003"),
             file: String::from("output.txt"),
-            packet_size: 1500,
-            window_size: 15,
+            max_packet_size: 1500,
+            max_window_size: 15,
             timeout: 2000,
         };
     }
@@ -31,8 +31,11 @@ impl Config {
         return &self.file;
     }
 
-    pub fn max_packet_size(&self) -> u32 {
-        return self.packet_size;
+    pub fn max_packet_size(&self) -> u16 {
+        return self.max_packet_size;
+    }
+    pub fn max_window_size(&self) -> u16 {
+        return self.max_window_size;
     }
 
     pub fn is_verbose(&self) -> bool {
@@ -49,9 +52,9 @@ impl Config {
                 .add_option(&["--addr"], Store, "Address to bind to in format ip:port");
             parser.refer(&mut config.file)
                 .add_option(&["-f", "--file"], Store, "File to store");
-            parser.refer(&mut config.packet_size)
+            parser.refer(&mut config.max_packet_size)
                 .add_option(&["--packet"], Store, "Maximum packet size");
-            parser.refer(&mut config.window_size)
+            parser.refer(&mut config.max_window_size)
                 .add_option(&["-w", "--window"], Store, "Size of the window");
             parser.refer(&mut config.timeout)
                 .add_option(&["-t", "--timeout"], Store, "Timeout after starts to resend the data");

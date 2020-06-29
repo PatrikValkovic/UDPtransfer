@@ -1,4 +1,5 @@
 pub mod packet;
+pub mod ConnectionProperties;
 
 pub mod broker;
 pub mod sender;

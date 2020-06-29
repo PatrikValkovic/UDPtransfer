@@ -33,23 +33,31 @@ impl ToBin for InitPacket {
     }
 
     fn from_bin(memory: &[u8]) -> Result<Self, ParsingError> {
+        let packet = InitPacket::from_bin_noexcept(memory);
+
+        let expected_memory = (packet.packet_size - packet.checksum_size) as usize;
+        if memory.len() < expected_memory {
+            return Err(ParsingError::InvalidSize(expected_memory, memory.len()));
+        }
+
+        Ok(packet)
+    }
+}
+
+impl InitPacket {
+    pub fn from_bin_noexcept(memory: &[u8]) -> Self {
         let header = PacketHeader::from_bin(memory).unwrap();
         let header_size = header.bin_size() as usize;
         let window_size = NetworkEndian::read_u16(&memory[header_size..header_size + 2]);
         let packet_size = NetworkEndian::read_u16(&memory[header_size + 2..header_size + 4]);
         let checksum_size = NetworkEndian::read_u16(&memory[header_size + 4..header_size + 6]);
 
-        let expected_memory = (packet_size - checksum_size) as usize;
-        if memory.len() < expected_memory {
-            return Err(ParsingError::InvalidSize(expected_memory, memory.len()));
-        }
-
-        Ok(InitPacket {
+        Self {
             header,
             window_size,
             packet_size,
             checksum_size,
-        })
+        }
     }
 }
 

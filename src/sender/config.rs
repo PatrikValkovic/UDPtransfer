@@ -1,4 +1,4 @@
-use std::net::SocketAddrV4;
+use std::net::{SocketAddrV4, SocketAddr};
 use std::str::FromStr;
 use argparse::{ArgumentParser, StoreTrue, Store};
 
@@ -6,7 +6,7 @@ pub struct Config {
     verbose: bool,
     bind_addr: String,
     file: String,
-    packet_size: u32,
+    packet_size: u16,
     send_addr: String,
     window_size: u16,
     timeout: u32,
@@ -33,15 +33,15 @@ impl Config {
         return SocketAddrV4::from_str(self.bind_addr.as_str()).expect("Bind address is invalid");
     }
 
-    pub fn send_addr(&self) -> SocketAddrV4 {
-        return SocketAddrV4::from_str(self.send_addr.as_str()).expect("Send address is invalid");
+    pub fn send_addr(&self) -> SocketAddr {
+        return SocketAddr::from_str(self.send_addr.as_str()).expect("Send address is invalid");
     }
 
     pub fn filename(&self) -> &str {
         return &self.file;
     }
 
-    pub fn max_packet_size(&self) -> u32 {
+    pub fn max_packet_size(&self) -> u16 {
         return self.packet_size;
     }
 
@@ -55,6 +55,14 @@ impl Config {
 
     pub fn window_size(&self) -> u16 {
         return self.window_size;
+    }
+
+    pub fn repetitions(&self) -> u16 {
+        return self.repetition;
+    }
+
+    pub fn checksum_size(&self) -> u16 {
+        return self.sum_size;
     }
 
 

@@ -9,6 +9,7 @@ use rand::{thread_rng, Rng, distributions::Uniform};
 
 use super::config::Config;
 use super::packet_wrapper::PacketWrapper;
+use std::cmp::min;
 
 pub fn broker(config: Config) -> () {
     let send_socket = Arc::new(UdpSocket::bind(config.sender_bind()).expect("Can't bind sender socket"));
@@ -56,8 +57,7 @@ fn receiving_part(
     condvar: &Arc<Condvar>,
     socket: &Arc<UdpSocket>,
 ) {
-    let mut buff = Vec::new();
-    buff.resize(config.max_packet_size() as usize, 0);
+    let mut buff = vec![0; 65535];
     let mut rand_gen = thread_rng();
     let unif = Uniform::new(0.0, 1.0);
 
@@ -69,8 +69,7 @@ fn receiving_part(
 
         if rand_gen.sample(unif) > config.droprate() {
             let delay: f32 = f32::max(0.0, config.delay_std() * rand_gen.gen::<f32>() + config.delay_mean());
-            let mut content = buff.clone();
-            content.resize(size, 0);
+            let content = Vec::from(&buff[..min(size, config.max_packet_size() as usize)]);
             let wrapper = PacketWrapper::new(content, delay as u32);
 
             {

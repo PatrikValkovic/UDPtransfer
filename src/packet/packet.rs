@@ -1,5 +1,6 @@
 use super::{ToBin, Flag, ParsingError, PacketHeader};
 use super::{InitPacket, DataPacket, ErrorPacket, EndPacket};
+use std::num::ParseIntError;
 
 
 #[derive(Debug)]
@@ -74,7 +75,11 @@ impl Packet {
         }
         let checksum_start = memory.len() - checksum;
 
-        let package = ToBin::from_bin(&memory[..checksum_start])?;
+        let package = match ToBin::from_bin(&memory[..checksum_start]) {
+            Ok(packet) => packet,
+            Err(ParsingError::InvalidSize(expected, actual)) => return Err(ParsingError::InvalidSize(expected, memory.len())),
+            Err(e) => return Err(e),
+        };
 
         if checksum > 0 {
             let orig_checksum = Vec::from(&memory[checksum_start..]);
