@@ -8,7 +8,7 @@ mod packet;
 
 
 pub use enums::{ParsingError, Flag};
-use enums::ToBin;
+pub use enums::ToBin;
 pub use packet_header::PacketHeader;
 pub use init_packet::InitPacket;
 pub use data_packet::DataPacket;

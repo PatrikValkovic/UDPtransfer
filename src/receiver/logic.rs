@@ -2,12 +2,13 @@ use std::net::{UdpSocket, SocketAddr};
 use std::fs::File;
 use std::result::Result::Ok;
 use std::io::Write;
+use std::cmp::{max, min};
+
+use rand::random;
 
 use super::config::Config;
 use crate::ConnectionProperties::ConnectionProperties;
-use rand::random;
-use crate::packet::{InitPacket, Packet, ParsingError, Flag};
-use std::cmp::{max, min};
+use crate::packet::{InitPacket, Packet, ParsingError, Flag, EndPacket, PacketHeader, ToBin};
 
 pub fn logic(config: Config) -> Result<(), String> {
     let mut output_file = File::create(config.filename()).expect("Couldn't open file");
@@ -28,29 +29,75 @@ pub fn logic(config: Config) -> Result<(), String> {
         }
     };
 
-    /*
-    let mut buff = Vec::new();
-    buff.resize(config.max_packet_size() as usize, 0);
-
-    while let Ok((size, sender)) = socket.recv_from(buff.as_mut_slice()) {
-        if config.is_verbose() {
-            println!("Received {}b of data from {}.", size, sender);
-        }
-
-        let wrote = output_file.write(&buff.as_slice()[..size]);
-        match wrote {
-            Ok(wrote) if config.is_verbose() => {
-                println!("Wrote {}b of data", wrote);
-            }
-            Ok(_) => (),
-            Err(e) => return Err(String::from("Error sending data")),
-        };
-    };
-    */
-
+    let mut buffer = vec![0; connection_properties.packet_size as usize];
     loop {
+        match socket.recv_from(&mut buffer) {
+            Ok((read, from)) => {
+                if config.is_verbose() {
+                    println!("Received {}b from {}", read, from);
+                }
+                let packet = Packet::from_bin(&buffer[..read], connection_properties.checksum_size as usize);
+                match packet {
+                    Ok(packet) => {
+                        let packet = check_packet_validity(packet, connection_properties.id, &from, &connection_properties.socket_addr)?;
+                        match packet {
+                            Packet::Init(packet) => {
+                                send_init_packet_back(
+                                    connection_properties.id,
+                                    connection_properties.window_size,
+                                    connection_properties.packet_size,
+                                    connection_properties.checksum_size,
+                                    &socket,
+                                    &connection_properties.socket_addr
+                                );
+                            }
+                            Packet::Error(packet) => {
+                                return Err(String::from("Error packed received"));
+                            }
+                            Packet::End(packet) => {
+                                if config.is_verbose() {
+                                    println!("End packet received");
+                                }
+                                let answer = EndPacket::new(connection_properties.id, 0 /* TODO */);
+                                let packet = Packet::from(answer);
+                                let wrote = packet.to_bin_buff(&mut buffer, connection_properties.checksum_size as usize);
+                                socket.send_to(&buffer[..wrote], connection_properties.socket_addr);
+                                break;
+                            }
+                            Packet::Data(packet) => {
 
-    };
+                            },
+                        };
+                    }
+                    Err(ParsingError::InvalidSize(_, _)) if Flag::from_bin(&buffer[PacketHeader::flag_position()..]).unwrap() == Flag::Init => {
+                        if config.is_verbose() {
+                            println!("Received init packet again, sending connection info.")
+                        }
+                        send_init_packet_back(
+                            connection_properties.id,
+                            connection_properties.window_size,
+                            connection_properties.packet_size,
+                            connection_properties.checksum_size,
+                            &socket,
+                            &connection_properties.socket_addr
+                        );
+                    },
+                    Err(e) => {
+                        if config.is_verbose() {
+                            println!("Error parsing packed: {:?}", e);
+                        }
+                        return Err(String::from("Error parsing packet"));
+                    },
+                };
+            }
+            Err(e) => {
+                if config.is_verbose() {
+                    println!("Error receiving packet: {}", e);
+                }
+                return Err(String::from("Error receiving packet"));
+            }
+        }
+    }
 
     return Ok(());
 }
@@ -113,4 +160,29 @@ fn send_init_packet_back(connection_id: u32, window_size: u16, packet_size: u16,
     let buffer = packet.to_bin(checksum_suze as usize);
     socket.send_to(&buffer, addr);
 }
+
+fn check_packet_validity(packet: Packet, connection_id: u32, senderaddr: &SocketAddr, expectedsender: &SocketAddr) -> Result<Packet, String>{
+    if expectedsender != senderaddr {
+        return Err(format!("Expected to receive data from {}, but received from {}", expectedsender, senderaddr));
+    }
+    match packet {
+        Packet::Init(packet) if packet.header.id != connection_id => {
+            return Err(format!("Expected connection id {}, but received {}", connection_id, packet.header.id));
+        }
+        Packet::Error(packet) if packet.header.id != connection_id => {
+            return Err(format!("Expected connection id {}, but received {}", connection_id, packet.header.id));
+        }
+        Packet::Data(packet) if packet.header.id != connection_id => {
+            return Err(format!("Expected connection id {}, but received {}", connection_id, packet.header.id));
+        }
+        Packet::End(packet) if packet.header.id != connection_id => {
+            return Err(format!("Expected connection id {}, but received {}", connection_id, packet.header.id));
+        }
+        _ => {}
+    };
+
+
+    return Ok(packet);
+}
+
 

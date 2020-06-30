@@ -2,7 +2,7 @@ use super::{ToBin, Flag, ParsingError, PacketHeader};
 
 #[derive(Debug)]
 pub struct EndPacket {
-    header: PacketHeader,
+    pub header: PacketHeader,
 }
 
 impl ToBin for EndPacket {
