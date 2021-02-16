@@ -1,6 +1,7 @@
 use std::net::SocketAddrV4;
 use std::str::FromStr;
 use argparse::{ArgumentParser, StoreTrue, Store};
+use std::ops::Add;
 
 pub struct Config {
     verbose: bool,
@@ -27,8 +28,8 @@ impl Config {
         return SocketAddrV4::from_str(self.bindaddr.as_str()).expect("Invalid bind address");
     }
 
-    pub fn filename(&self) -> &str {
-        return &self.file;
+    pub fn filename(&self, connection_id: u32) -> String {
+        return String::from(&self.directory).add("/").add(&connection_id.to_string());
     }
 
     pub fn max_packet_size(&self) -> u16 {
@@ -50,7 +51,7 @@ impl Config {
                 .add_option(&["-v", "--verbose"], StoreTrue, "Verbose output");
             parser.refer(&mut config.bindaddr)
                 .add_option(&["--addr"], Store, "Address to bind to in format ip:port");
-            parser.refer(&mut config.file)
+            parser.refer(&mut config.directory)
                 .add_option(&["-d", "--directory"], Store, "Directory where to store received files");
             parser.refer(&mut config.max_packet_size)
                 .add_option(&["--packet"], Store, "Maximum packet size");

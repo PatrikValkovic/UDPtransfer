@@ -16,7 +16,7 @@ impl ToBin for EndPacket {
 
     fn from_bin(memory: &[u8]) -> Result<Self, ParsingError> {
         Ok(Self {
-            header: PacketHeader::from_bin(memory).unwrap(),
+            header: PacketHeader::from_bin(memory)?,
         })
     }
 }

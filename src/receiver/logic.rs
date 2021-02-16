@@ -7,7 +7,7 @@ use itertools::Itertools;
 use rand::random;
 
 use super::config::Config;
-use crate::ConnectionProperties::ConnectionProperties;
+use crate::connection_properties::ConnectionProperties;
 use crate::packet::{InitPacket, Packet, ParsingError, Flag, EndPacket, PacketHeader, ToBin};
 
 pub fn logic(config: Config) -> Result<(), String> {
@@ -17,18 +17,18 @@ pub fn logic(config: Config) -> Result<(), String> {
     }
 
     let mut buffer = vec![0; 65535];
-    while true{
+    loop {
         let result = socket.recv_from(&mut buffer);
         if let Err(E) = result {
-            if config.is_verbose(){
+            if config.is_verbose() {
                 println!("Error receiving packet, {:?}", E);
             }
             continue;
         };
 
-        let (packet_size, received_from) = result.into_ok();
+        let (packet_size, received_from) = result.unwrap();
         if packet_size < PacketHeader::bin_size() {
-            if config.is_verbose(){
+            if config.is_verbose() {
                 println!("Invalid packet with size {}", packet_size);
             }
             continue;
@@ -37,30 +37,52 @@ pub fn logic(config: Config) -> Result<(), String> {
         let header_result = PacketHeader::from_bin(&buffer[..PacketHeader::bin_size()]);
         if let Err(E) = header_result {
             if config.is_verbose() {
-                let header_in_bin = buffer[..PacketHeader::bin_size()];
-                let header_in_str = header_in_bin.iter()
-                    .map(|num| {format!("{:02x}", num)})
+                let header_in_bin = &buffer[..PacketHeader::bin_size()];
+                let header_in_str: String = header_in_bin.iter()
+                    .map(|num| { format!("{:02x}", num) })
                     .intersperse(String::from(""))
                     .collect();
-                println!("Invalid header: {:?}; raw: {}",
-                         E,
-                         header_in_str
+                println!("Invalid header: {}; error: {:?}",
+                         header_in_str,
+                         E
                 );
             }
             continue;
         }
-        let header = header_result.into_ok();
+        let header = header_result.unwrap();
 
         match header.flag {
-            Flag::None => {}
-            Flag::Init => {}
+
+            Flag::None => {
+                if config.is_verbose() {
+                    println!("Flag is not specified");
+                }
+                continue;
+            }
+
+            Flag::Init => {
+                // Get data
+                let init_content_result = InitPacket::from_bin_no_size_and_hash_check(&buffer[..packet_size]);
+                if let Err(ref E) = init_content_result {
+                    if config.is_verbose() {
+                        println!("Can't get content of init packet {:?}", E);
+                        continue;
+                    }
+                }
+                let init_content = init_content_result.unwrap();
+            }
+
             Flag::Data => {}
             Flag::Error => {}
-            Flag::End => {}
+            Flag::End => {
+                break;
+            }
         };
     };
 
-    let connection_properties = match connection_creation(&config, &socket) {
+    return Ok(());
+
+    /*let connection_properties = match connection_creation(&config, &socket) {
         Ok(prop) => prop,
         Err(()) => {
             println!("Can't create connection");
@@ -139,8 +161,10 @@ pub fn logic(config: Config) -> Result<(), String> {
     }
 
     return Ok(());
+     */
 }
 
+/*
 fn send_init_packet_back(connection_id: u32, window_size: u16, packet_size: u16, checksum_suze: u16, socket: &UdpSocket, addr: &SocketAddr) {
     let mut init = InitPacket::new(window_size, packet_size, checksum_suze);
     init.header.id = connection_id;
@@ -148,5 +172,5 @@ fn send_init_packet_back(connection_id: u32, window_size: u16, packet_size: u16,
     let buffer = packet.to_bin(checksum_suze as usize);
     socket.send_to(&buffer, addr);
 }
-
+*/
 

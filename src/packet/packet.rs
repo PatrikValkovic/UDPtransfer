@@ -1,7 +1,5 @@
-use super::{ToBin, Flag, ParsingError, PacketHeader};
+use super::{ToBin, Flag, ParsingError, PacketHeader, Checksum};
 use super::{InitPacket, DataPacket, ErrorPacket, EndPacket};
-use std::num::ParseIntError;
-
 
 #[derive(Debug)]
 pub enum Packet {
@@ -32,7 +30,7 @@ impl ToBin for Packet {
 
     fn from_bin(memory: &[u8]) -> Result<Self, ParsingError> {
         let flag_pos = PacketHeader::flag_position();
-        let flag = Flag::from_bin(&memory[flag_pos..flag_pos + 1]).unwrap();
+        let flag = Flag::from_bin(&memory[flag_pos..flag_pos + 1])?;
         Ok(match flag {
             Flag::Init => Self::Init(InitPacket::from_bin(memory)?),
             Flag::Error => Self::Error(ErrorPacket::from_bin(memory)?),
@@ -54,17 +52,15 @@ impl Packet {
         return memory;
     }
 
-    pub fn to_bin_buff(&self, memory: &mut [u8], checksum: usize) -> usize {
+    pub fn to_bin_buff(&self, memory: &mut [u8], checksum_size: usize) -> usize {
         let data_end = self.bin_size();
-        let packet_size = data_end + checksum;
+        let packet_size = data_end + checksum_size;
         debug_assert!(memory.len() >= packet_size);
 
         ToBin::to_bin_buff(self, &mut memory[..data_end]);
 
-        if checksum > 0 {
-            let checksum = construct_checksum(&memory[..data_end], checksum);
-            memory[data_end..].copy_from_slice(checksum.as_slice());
-        }
+        let checksum = Checksum::from_packet_content(&memory[..data_end], checksum_size);
+        checksum.to_bin_buff(&mut memory[data_end..]);
 
         return packet_size;
     }
@@ -81,12 +77,10 @@ impl Packet {
             Err(e) => return Err(e),
         };
 
-        if checksum > 0 {
-            let orig_checksum = Vec::from(&memory[checksum_start..]);
-            let comp_checksum = construct_checksum(&memory[..checksum_start], checksum);
-            if !checksums_match(&orig_checksum, &comp_checksum) {
+        let stored_checksum = Checksum::from_bin(&memory[checksum_start..])?;
+        let computed_checksum = Checksum::from_packet_content(&memory[..checksum_start], checksum);
+        if !stored_checksum.is_same(&computed_checksum){
                 return Err(ParsingError::ChecksumNotMatch);
-            }
         }
 
         return Ok(package);
@@ -114,41 +108,6 @@ impl From<ErrorPacket> for Packet {
 impl From<EndPacket> for Packet {
     fn from(packet: EndPacket) -> Self {
         Packet::End(packet)
-    }
-}
-
-
-fn num_blocks(data: usize, checksum_size: usize) -> usize {
-    return match (data / checksum_size, data % checksum_size) {
-        (div, 0) => div,
-        (div, _modulo) => div + 1
-    };
-}
-
-fn construct_checksum(data: &[u8], checksum_size: usize) -> Vec<u8> {
-    let mut checksum = vec![0; checksum_size];
-    let blocks = num_blocks(data.len(), checksum_size);
-
-    for i in 0..blocks {
-        let ending = usize::min((i + 1) * checksum_size, data.len());
-        let block = &data[i * checksum_size..ending];
-        checksum.iter_mut()
-            .zip(block.iter())
-            .for_each(|(orig, new)| {
-                *orig = *orig ^ *new;
-            });
-    };
-
-    return checksum;
-}
-
-fn checksums_match(first: &[u8], second: &[u8]) -> bool {
-    if let Some(_) = first.iter()
-        .zip(second.iter())
-        .find(|(&comp, &inside)| { comp != inside }) {
-        return false;
-    } else {
-        return true;
     }
 }
 

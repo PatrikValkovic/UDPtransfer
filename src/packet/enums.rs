@@ -1,3 +1,5 @@
+use crate::packet::enums::ParsingError::InvalidFlag;
+
 #[derive(Debug, PartialEq)]
 pub enum ParsingError {
     InvalidSize(usize, usize), // expected, actual
@@ -38,13 +40,14 @@ impl ToBin for Flag {
         return 1;
     }
     fn from_bin(val: &[u8]) -> Result<Self, ParsingError> {
-        Ok(match val[0] {
-            0x1 => Flag::Init,
-            0x2 => Flag::Data,
-            0x4 => Flag::Error,
-            0x8 => Flag::End,
-            _ => Flag::None,
-        })
+        match val[0] {
+            0x0 => Ok(Flag::None),
+            0x1 => Ok(Flag::Init),
+            0x2 => Ok(Flag::Data),
+            0x4 => Ok(Flag::Error),
+            0x8 => Ok(Flag::End),
+            _ => Err(InvalidFlag(val[0])),
+        }
     }
 }
 
@@ -62,20 +65,20 @@ impl Flag {
 
 #[cfg(test)]
 mod tests {
-    use crate::packet::{Packet, ParsingError};
+    use crate::packet::{Flag, ParsingError, ToBin};
+
+    #[test]
+    fn valid_flag() {
+        let data: Vec<u8> = vec![0x4];
+        if let Ok(Flag::Error) = Flag::from_bin(&data) {} else {
+            panic!();
+        }
+    }
 
     #[test]
     fn invalid_flag() {
-        let data: Vec<u8> = vec![
-            0, 0, 1, 0, //id
-            0, 5, //seq
-            0, 8, //ack
-            7, //flag
-            1, 2, 3, //data
-            4, 5, 6, 7, //data
-            7 ^ 4, 5 ^ 1 ^ 5, 1 ^ 2 ^ 6, 8 ^ 3 ^ 7
-        ];
-        if let Err(ParsingError::InvalidFlag(7)) = Packet::from_bin(&data.as_slice(), 4) {} else {
+        let data: Vec<u8> = vec![7];
+        if let Err(ParsingError::InvalidFlag(7)) = Flag::from_bin(&data) {} else {
             panic!();
         }
     }

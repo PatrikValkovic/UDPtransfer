@@ -5,6 +5,7 @@ mod data_packet;
 mod error_packet;
 mod end_packet;
 mod packet;
+mod checksum;
 
 
 pub use enums::{ParsingError, Flag};
@@ -15,3 +16,4 @@ pub use data_packet::DataPacket;
 pub use error_packet::ErrorPacket;
 pub use end_packet::EndPacket;
 pub use packet::Packet;
+pub use checksum::Checksum;

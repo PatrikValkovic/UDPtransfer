@@ -19,7 +19,7 @@ impl ToBin for DataPacket {
     }
 
     fn from_bin(memory: &[u8]) -> Result<Self, ParsingError> {
-        let header = PacketHeader::from_bin(memory).unwrap();
+        let header = PacketHeader::from_bin(memory)?;
         let header_size = header.bin_size();
         let data = Vec::from(&memory[header_size..]);
 
@@ -41,12 +41,6 @@ impl DataPacket {
             },
             data,
         };
-    }
-}
-
-impl From<(&[u8], usize)> for DataPacket {
-    fn from((data, checksum_size): (&[u8], usize)) -> Self {
-        return DataPacket::from_bin(&data[..data.len() - checksum_size]).unwrap();
     }
 }
 

@@ -15,6 +15,7 @@ impl ToBin for PacketHeader {
     }
 
     fn to_bin_buff(&self, buff: &mut [u8]) -> usize {
+        debug_assert!(buff.len() >= Self::bin_size());
         NetworkEndian::write_u32(&mut buff[..4], self.id);
         NetworkEndian::write_u16(&mut buff[4..6], self.seq);
         NetworkEndian::write_u16(&mut buff[6..8], self.ack);
@@ -22,6 +23,7 @@ impl ToBin for PacketHeader {
     }
 
     fn from_bin(memory: &[u8]) -> Result<Self, ParsingError> {
+        debug_assert!(memory.len() >= Self::bin_size());
         let id = NetworkEndian::read_u32(&memory[..4]);
         let seq = NetworkEndian::read_u16(&memory[4..6]);
         let ack = NetworkEndian::read_u16(&memory[6..8]);

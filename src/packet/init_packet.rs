@@ -1,5 +1,6 @@
 use byteorder::{NetworkEndian, ByteOrder};
 use super::{ToBin, Flag, ParsingError, PacketHeader};
+use crate::packet::checksum::Checksum;
 
 #[derive(Debug)]
 pub struct InitPacket {
@@ -11,33 +12,32 @@ pub struct InitPacket {
 
 impl ToBin for InitPacket {
     fn bin_size(&self) -> usize {
-        debug_assert!(self.header.bin_size() + 6 < self.packet_size as usize);
+        debug_assert!(self.header.bin_size() + 6 + (self.checksum_size as usize) < self.packet_size as usize);
         return (self.packet_size - self.checksum_size) as usize;
     }
 
     fn to_bin_buff(&self, buff: &mut [u8]) -> usize {
         debug_assert!(buff.len() >= self.bin_size());
-        let header_size = self.header.bin_size() as usize;
 
-        self.header.to_bin_buff(buff);
-        NetworkEndian::write_u16(&mut buff[header_size..header_size + 2], self.window_size);
-        NetworkEndian::write_u16(&mut buff[header_size + 2..header_size + 4], self.packet_size);
-        NetworkEndian::write_u16(&mut buff[header_size + 4..header_size + 6], self.checksum_size);
+        let after_header = self.header.to_bin_buff(buff);
+        NetworkEndian::write_u16(&mut buff[after_header..after_header + 2], self.window_size);
+        NetworkEndian::write_u16(&mut buff[after_header + 2..after_header + 4], self.packet_size);
+        NetworkEndian::write_u16(&mut buff[after_header + 4..after_header + 6], self.checksum_size);
 
         let checksum_start = (self.packet_size - self.checksum_size) as usize;
-        for val in &mut buff[header_size+6..checksum_start] {
+        for val in &mut buff[after_header+6..checksum_start] {
             *val = 0;
         }
 
-        return checksum_start as usize;
+        return checksum_start;
     }
 
     fn from_bin(memory: &[u8]) -> Result<Self, ParsingError> {
-        let packet = InitPacket::from_bin_noexcept(memory);
+        let packet = InitPacket::from_bin_no_size_and_hash_check(memory)?;
 
-        let expected_memory = (packet.packet_size - packet.checksum_size) as usize;
-        if memory.len() < expected_memory {
-            return Err(ParsingError::InvalidSize(expected_memory, memory.len()));
+        let expected_size = packet.bin_size();
+        if memory.len() < expected_size {
+            return Err(ParsingError::InvalidSize(expected_size, memory.len()));
         }
 
         Ok(packet)
@@ -45,19 +45,23 @@ impl ToBin for InitPacket {
 }
 
 impl InitPacket {
-    pub fn from_bin_noexcept(memory: &[u8]) -> Self {
-        let header = PacketHeader::from_bin(memory).unwrap();
+    pub fn from_bin_no_size_and_hash_check(memory: &[u8]) -> Result<Self, ParsingError> {
+        let header = PacketHeader::from_bin(memory)?;
         let header_size = header.bin_size() as usize;
+        let at_least_size = PacketHeader::bin_size() + 6;
+        if memory.len() < at_least_size {
+            return Err(ParsingError::InvalidSize(at_least_size, memory.len()));
+        }
         let window_size = NetworkEndian::read_u16(&memory[header_size..header_size + 2]);
         let packet_size = NetworkEndian::read_u16(&memory[header_size + 2..header_size + 4]);
         let checksum_size = NetworkEndian::read_u16(&memory[header_size + 4..header_size + 6]);
 
-        Self {
+        Ok(Self {
             header,
             window_size,
             packet_size,
             checksum_size,
-        }
+        })
     }
 }
 
