@@ -5,7 +5,7 @@ use std::io::{Read, ErrorKind};
 use std::time::Duration;
 
 use super::config::Config;
-use crate::ConnectionProperties::ConnectionProperties;
+use crate::connection_properties::ConnectionProperties;
 use crate::packet::{Packet, InitPacket};
 
 pub fn logic(config: Config) -> Result<(), String> {

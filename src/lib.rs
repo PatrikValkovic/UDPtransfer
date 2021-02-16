@@ -1,5 +1,5 @@
 pub mod packet;
-pub mod ConnectionProperties;
+pub mod connection_properties;
 
 pub mod broker;
 pub mod sender;
