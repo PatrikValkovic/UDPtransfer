@@ -3,7 +3,7 @@ use std::fs::File;
 use std::result::Result::Ok;
 use std::io::Write;
 use std::cmp::{max, min};
-
+use itertools::Itertools;
 use rand::random;
 
 use super::config::Config;
@@ -11,15 +11,54 @@ use crate::ConnectionProperties::ConnectionProperties;
 use crate::packet::{InitPacket, Packet, ParsingError, Flag, EndPacket, PacketHeader, ToBin};
 
 pub fn logic(config: Config) -> Result<(), String> {
-    let mut output_file = File::create(config.filename()).expect("Couldn't open file");
-    if config.is_verbose() {
-        println!("File {} opened", config.filename());
-    }
-
     let socket = UdpSocket::bind(config.binding()).expect("Can't bind socket");
     if config.is_verbose() {
         println!("Socket bind to {}", config.binding());
     }
+
+    let mut buffer = vec![0; 65535];
+    while true{
+        let result = socket.recv_from(&mut buffer);
+        if let Err(E) = result {
+            if config.is_verbose(){
+                println!("Error receiving packet, {:?}", E);
+            }
+            continue;
+        };
+
+        let (packet_size, received_from) = result.into_ok();
+        if packet_size < PacketHeader::bin_size() {
+            if config.is_verbose(){
+                println!("Invalid packet with size {}", packet_size);
+            }
+            continue;
+        }
+
+        let header_result = PacketHeader::from_bin(&buffer[..PacketHeader::bin_size()]);
+        if let Err(E) = header_result {
+            if config.is_verbose() {
+                let header_in_bin = buffer[..PacketHeader::bin_size()];
+                let header_in_str = header_in_bin.iter()
+                    .map(|num| {format!("{:02x}", num)})
+                    .intersperse(String::from(""))
+                    .collect();
+                println!("Invalid header: {:?}; raw: {}",
+                         E,
+                         header_in_str
+                );
+            }
+            continue;
+        }
+        let header = header_result.into_ok();
+
+        match header.flag {
+            Flag::None => {}
+            Flag::Init => {}
+            Flag::Data => {}
+            Flag::Error => {}
+            Flag::End => {}
+        };
+    };
 
     let connection_properties = match connection_creation(&config, &socket) {
         Ok(prop) => prop,
@@ -102,87 +141,12 @@ pub fn logic(config: Config) -> Result<(), String> {
     return Ok(());
 }
 
-fn connection_creation(config: &Config, socket: &UdpSocket) -> Result<ConnectionProperties, ()> {
-    let connection_id: u32 = random();
-    loop {
-        let mut head = vec![0; 3000];
-        let (read, from) = socket.peek_from(&mut head).unwrap();
-        let packet = InitPacket::from_bin_noexcept(&head);
-        if packet.header.flag != Flag::Init {
-            if config.is_verbose() {
-                println!("Received wrong packet type");
-            }
-            continue;
-        }
-
-        if config.is_verbose() {
-            println!("Query packet size {}, window_size {}, checksum size: {}", packet.packet_size, packet.window_size, packet.checksum_size);
-        }
-
-        let mut head = vec![0; packet.packet_size as usize];
-        let (read, from) = socket.recv_from(&mut head).unwrap();
-        let parsed_packet = Packet::from_bin(&head[..read], packet.checksum_size as usize);
-        match parsed_packet {
-            Err(ParsingError::InvalidSize(expected, actual)) => {
-                if config.is_verbose() {
-                    println!("Not enough data received, expected {} received {}", expected, actual);
-                }
-                let new_packet_size = min(actual as u16, config.max_packet_size());
-                let new_window_size = min(packet.window_size, config.max_window_size());
-                send_init_packet_back(connection_id, new_window_size, new_packet_size, packet.checksum_size, &socket, &from);
-                println!("Connection with {} created", from);
-                if config.is_verbose() {
-                    println!("Connection properties: packet size {}, window_size {}, checksum size: {}", new_packet_size, new_window_size, packet.checksum_size);
-                }
-                return Ok(ConnectionProperties::new(connection_id, packet.checksum_size, new_window_size, new_packet_size, from));
-            }
-            Ok(Packet::Init(packet)) => {
-                let new_packet_size = min(packet.packet_size, config.max_packet_size());
-                let new_window_size = min(packet.window_size, config.max_window_size());
-                send_init_packet_back(connection_id, new_window_size, new_packet_size, packet.checksum_size, &socket, &from);
-                println!("Connection with {} created", from);
-                return Ok(ConnectionProperties::new(connection_id, packet.checksum_size, new_window_size, new_packet_size, from));
-            }
-            Ok(_) if config.is_verbose() => println!("Received unexpected packet type"),
-            Ok(_) => {},
-            Err(e) => {
-                eprintln!("Error receiving init packet: {:?}", e);
-                return Err(());
-            }
-        }
-    }
-}
-
 fn send_init_packet_back(connection_id: u32, window_size: u16, packet_size: u16, checksum_suze: u16, socket: &UdpSocket, addr: &SocketAddr) {
     let mut init = InitPacket::new(window_size, packet_size, checksum_suze);
     init.header.id = connection_id;
     let packet = Packet::Init(init);
     let buffer = packet.to_bin(checksum_suze as usize);
     socket.send_to(&buffer, addr);
-}
-
-fn check_packet_validity(packet: Packet, connection_id: u32, senderaddr: &SocketAddr, expectedsender: &SocketAddr) -> Result<Packet, String>{
-    if expectedsender != senderaddr {
-        return Err(format!("Expected to receive data from {}, but received from {}", expectedsender, senderaddr));
-    }
-    match packet {
-        Packet::Init(packet) if packet.header.id != connection_id => {
-            return Err(format!("Expected connection id {}, but received {}", connection_id, packet.header.id));
-        }
-        Packet::Error(packet) if packet.header.id != connection_id => {
-            return Err(format!("Expected connection id {}, but received {}", connection_id, packet.header.id));
-        }
-        Packet::Data(packet) if packet.header.id != connection_id => {
-            return Err(format!("Expected connection id {}, but received {}", connection_id, packet.header.id));
-        }
-        Packet::End(packet) if packet.header.id != connection_id => {
-            return Err(format!("Expected connection id {}, but received {}", connection_id, packet.header.id));
-        }
-        _ => {}
-    };
-
-
-    return Ok(packet);
 }
 
 

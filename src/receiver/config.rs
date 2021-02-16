@@ -5,7 +5,7 @@ use argparse::{ArgumentParser, StoreTrue, Store};
 pub struct Config {
     verbose: bool,
     bindaddr: String,
-    file: String,
+    directory: String,
     max_packet_size: u16,
     max_window_size: u16,
     timeout: u32,
@@ -16,7 +16,7 @@ impl Config {
         return Config {
             verbose: false,
             bindaddr: String::from("127.0.0.1:3003"),
-            file: String::from("output.txt"),
+            directory: String::from("received"),
             max_packet_size: 1500,
             max_window_size: 15,
             timeout: 2000,
@@ -51,7 +51,7 @@ impl Config {
             parser.refer(&mut config.bindaddr)
                 .add_option(&["--addr"], Store, "Address to bind to in format ip:port");
             parser.refer(&mut config.file)
-                .add_option(&["-f", "--file"], Store, "File to store");
+                .add_option(&["-d", "--directory"], Store, "Directory where to store received files");
             parser.refer(&mut config.max_packet_size)
                 .add_option(&["--packet"], Store, "Maximum packet size");
             parser.refer(&mut config.max_window_size)
