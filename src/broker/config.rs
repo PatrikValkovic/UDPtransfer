@@ -13,6 +13,7 @@ pub struct Config {
     delay_mean: f32,
     delay_std: f32,
     drop_rate: f32,
+    modify_prob: f32,
 }
 
 impl Config {
@@ -27,6 +28,7 @@ impl Config {
             delay_mean: 0.0,
             delay_std: 0.0,
             drop_rate: 0.0,
+            modify_prob: 0.0,
         };
     }
 
@@ -58,6 +60,9 @@ impl Config {
     pub fn delay_std(&self) -> f32 {
         return self.delay_std;
     }
+    pub fn modify_prob(&self) -> f32 {
+        return self.modify_prob;
+    }
 
     pub fn from_command_line() -> Self {
         let mut config = Config::new();
@@ -81,6 +86,8 @@ impl Config {
                 .add_option(&["-s", "--delay_std"], Store, "Standard deviation of delay");
             parser.refer(&mut config.drop_rate)
                 .add_option(&["-d", "--drop_rate"], Store, "Percentage of packets to drop between 0 and 1");
+            parser.refer(&mut config.modify_prob)
+                .add_option(&["-m", "--modify"], Store, "Probability of byte modification");
             parser.parse_args_or_exit();
         }
         return config;

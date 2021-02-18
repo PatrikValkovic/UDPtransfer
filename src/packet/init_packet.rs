@@ -1,6 +1,5 @@
 use byteorder::{NetworkEndian, ByteOrder};
 use super::{ToBin, Flag, ParsingError, PacketHeader};
-use crate::packet::checksum::Checksum;
 
 #[derive(Debug)]
 pub struct InitPacket {

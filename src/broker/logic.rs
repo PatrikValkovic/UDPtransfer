@@ -60,6 +60,7 @@ fn receiving_part(
     let mut buff = vec![0; 65535];
     let mut rand_gen = thread_rng();
     let unif = Uniform::new(0.0, 1.0);
+    let byte_dist = Uniform::new(0,255);
 
     loop {
         let (size, sender) = socket.recv_from(buff.as_mut_slice()).expect("Can't receive data");
@@ -69,7 +70,15 @@ fn receiving_part(
 
         if rand_gen.sample(unif) > config.droprate() {
             let delay: f32 = f32::max(0.0, config.delay_std() * rand_gen.gen::<f32>() + config.delay_mean());
-            let content = Vec::from(&buff[..min(size, config.max_packet_size() as usize)]);
+            let content_length = min(size, config.max_packet_size() as usize);
+            for i in 0..content_length {
+                if rand_gen.sample(unif) < config.modify_prob() {
+                    buff[i] = rand_gen.sample(byte_dist);
+                }
+            }
+            let content = Vec::from(&buff[..content_length]);
+
+
             let wrapper = PacketWrapper::new(content, delay as u32);
 
             {
@@ -102,18 +111,22 @@ fn sending_part(
         loop {
             let to_send;
             {
-                let mut queue = loop {
-                    let queue_guard = queue.lock().expect("Can't lock mutex from the sender part");
-                    let wait_time = queue_guard.peek().map_or(Duration::from_millis(u64::MAX), |wrapper| { wrapper.send_in() });
-                    if wait_time.as_millis() == 0 {
-                        break queue_guard;
-                    }
-                    condvar.wait_timeout(
-                        queue_guard,
-                        wait_time,
-                    ).expect("Can't lock mutex from the sender part");
+                let packet = {
+                    let mut queue_guard = queue.lock().expect("Can't lock mutex from the sender part");
+                    loop {
+                        let wait_time = queue_guard.peek().map_or(Duration::from_millis(u64::MAX), |wrapper| { wrapper.send_in() });
+                        if wait_time.as_millis() == 0 {
+                            break;
+                        }
+                        let result = condvar.wait_timeout(
+                            queue_guard,
+                            wait_time,
+                        ).expect("Can't lock mutex from the sender part");
+                        queue_guard = result.0;
+                    };
+                    queue_guard.pop()
                 };
-                to_send = match queue.pop() {
+                to_send = match packet {
                     Some(x) => x,
                     None if config.is_verbose() => {
                         println!("No item in queue");

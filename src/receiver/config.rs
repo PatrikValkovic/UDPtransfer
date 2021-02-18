@@ -9,6 +9,7 @@ pub struct Config {
     directory: String,
     max_packet_size: u16,
     max_window_size: u16,
+    min_checksum: u16,
     timeout: u32,
 }
 
@@ -20,6 +21,7 @@ impl Config {
             directory: String::from("received"),
             max_packet_size: 1500,
             max_window_size: 15,
+            min_checksum: 16,
             timeout: 2000,
         };
     }
@@ -37,6 +39,9 @@ impl Config {
     }
     pub fn max_window_size(&self) -> u16 {
         return self.max_window_size;
+    }
+    pub fn min_checksum_size(&self) -> u16 {
+        return self.min_checksum;
     }
 
     pub fn is_verbose(&self) -> bool {
@@ -59,6 +64,8 @@ impl Config {
                 .add_option(&["-w", "--window"], Store, "Size of the window");
             parser.refer(&mut config.timeout)
                 .add_option(&["-t", "--timeout"], Store, "Timeout after starts to resend the data");
+            parser.refer(&mut config.min_checksum)
+                .add_option(&["--chhecksum"], Store, "Minimum size of checksum");
             parser.parse_args_or_exit();
         }
         return config;

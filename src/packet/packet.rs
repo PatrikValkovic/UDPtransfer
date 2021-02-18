@@ -60,7 +60,7 @@ impl Packet {
         ToBin::to_bin_buff(self, &mut memory[..data_end]);
 
         let checksum = Checksum::from_packet_content(&memory[..data_end], checksum_size);
-        checksum.to_bin_buff(&mut memory[data_end..]);
+        checksum.to_bin_buff(&mut memory[data_end..data_end+checksum_size]);
 
         return packet_size;
     }
@@ -73,7 +73,7 @@ impl Packet {
 
         let package = match ToBin::from_bin(&memory[..checksum_start]) {
             Ok(packet) => packet,
-            Err(ParsingError::InvalidSize(expected, actual)) => return Err(ParsingError::InvalidSize(expected, memory.len())),
+            Err(ParsingError::InvalidSize(expected, _)) => return Err(ParsingError::InvalidSize(expected+checksum, memory.len())),
             Err(e) => return Err(e),
         };
 

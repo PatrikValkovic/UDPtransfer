@@ -27,7 +27,7 @@ impl ToBin for PacketHeader {
         let id = NetworkEndian::read_u32(&memory[..4]);
         let seq = NetworkEndian::read_u16(&memory[4..6]);
         let ack = NetworkEndian::read_u16(&memory[6..8]);
-        let flag = Flag::from_bin(&memory[8..9]).unwrap();
+        let flag = Flag::from_bin(&memory[8..9])?;
         Ok(PacketHeader {
             id,
             seq,

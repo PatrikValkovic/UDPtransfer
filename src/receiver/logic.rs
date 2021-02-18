@@ -18,6 +18,7 @@ pub fn logic(config: Config) -> Result<(), String> {
 
     let mut buffer = vec![0; 65535];
     loop {
+        // receive from socket
         let result = socket.recv_from(&mut buffer);
         if let Err(E) = result {
             if config.is_verbose() {
@@ -25,7 +26,7 @@ pub fn logic(config: Config) -> Result<(), String> {
             }
             continue;
         };
-
+        // get content
         let (packet_size, received_from) = result.unwrap();
         if packet_size < PacketHeader::bin_size() {
             if config.is_verbose() {
@@ -33,7 +34,11 @@ pub fn logic(config: Config) -> Result<(), String> {
             }
             continue;
         }
-
+        if config.is_verbose() {
+            println!("Received packet of size {}", packet_size);
+        }
+        let packet_content = &buffer[..packet_size];
+        // parse header
         let header_result = PacketHeader::from_bin(&buffer[..PacketHeader::bin_size()]);
         if let Err(E) = header_result {
             if config.is_verbose() {
@@ -50,9 +55,13 @@ pub fn logic(config: Config) -> Result<(), String> {
             continue;
         }
         let header = header_result.unwrap();
-
+        if config.is_verbose() {
+            println!("Packet with flag {:?}", header.flag);
+        }
+        //process based on flag
         match header.flag {
 
+            // None flag ignore
             Flag::None => {
                 if config.is_verbose() {
                     println!("Flag is not specified");
@@ -60,8 +69,9 @@ pub fn logic(config: Config) -> Result<(), String> {
                 continue;
             }
 
+            // Init flag
             Flag::Init => {
-                // Get data
+                // Get content of init packet
                 let init_content_result = InitPacket::from_bin_no_size_and_hash_check(&buffer[..packet_size]);
                 if let Err(ref E) = init_content_result {
                     if config.is_verbose() {
@@ -70,6 +80,49 @@ pub fn logic(config: Config) -> Result<(), String> {
                     }
                 }
                 let init_content = init_content_result.unwrap();
+                // parse as packet
+                let packet = Packet::from_bin(packet_content, init_content.checksum_size as usize);
+                match packet {
+                    // everything OK, answer
+                    Ok(Packet::Init(InitPacket)) => {
+                        //TODO
+                    },
+                    // Not parsed init packet
+                    Ok(_) => {
+                        if config.is_verbose() {
+                            println!("Expected init packet, but parsed something different");
+                        }
+                    }
+                    // Checksum not match, can't infer content
+                    Err(ParsingError::ChecksumNotMatch) => {
+                        if config.is_verbose() {
+                            println!("Checksum of init packet not match, ignoring");
+                        }
+                    }
+                    // Received smaller packet, therefore checksum (and validity of data) can't be checked
+                    // Answer with receiver setting and let sender ask once again
+                    Err(ParsingError::InvalidSize(expect, actual)) => {
+                        if config.is_verbose() {
+                            println!("Expected init packet of size {}, but received {}", expect, actual);
+                        }
+                        let return_init = Packet::from(InitPacket::new(
+                            config.max_window_size(),
+                            min(config.max_packet_size(), packet_size as u16),
+                            config.min_checksum_size()
+                        ));
+                        let answer_packet_size = return_init.to_bin_buff(buffer.as_mut_slice(), config.min_checksum_size() as usize);
+                        socket.send_to(&buffer[..answer_packet_size], received_from);
+                        if config.is_verbose() {
+                            println!("Send INIT packet back because of invalid size");
+                        }
+                    }
+                    // Other error
+                    Err(E) => {
+                        if config.is_verbose() {
+                            println!("Error parsing init packet {:?}", E);
+                        }
+                    }
+                };
             }
 
             Flag::Data => {}
