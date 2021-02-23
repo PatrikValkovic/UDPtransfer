@@ -1,19 +1,22 @@
 use std::net::{UdpSocket};
 use std::fs::File;
 use std::result::Result::Ok;
-use std::io::Write;
+use std::io::ErrorKind;
 use std::cmp::{max, min};
 use std::collections::{HashMap as PropertiesMap};
 use rand::Rng;
 use itertools::Itertools;
 
 use super::config::Config;
-use crate::packet::{InitPacket, Packet, ParsingError, Flag, EndPacket, PacketHeader, ToBin};
+use crate::packet::{InitPacket, Packet, ParsingError, Flag, EndPacket, PacketHeader, ToBin, ErrorPacket};
 use crate::connection_properties::ConnectionProperties;
 use crate::receiver::receiver_connection_properties::ReceiverConnectionProperties;
+use std::time::Duration;
+use std::path::Path;
 
 pub fn logic(config: Config) -> Result<(), String> {
     let socket = UdpSocket::bind(config.binding()).expect("Can't bind socket");
+    socket.set_read_timeout(Some(Duration::from_millis(config.get_timeout() as u64))).expect("Can't set read timeout");
     if config.is_verbose() {
         println!("Socket bind to {}", config.binding());
     }
@@ -24,9 +27,34 @@ pub fn logic(config: Config) -> Result<(), String> {
 
     let mut buffer = vec![0; 65535];
     loop {
+        // filter timeouted connections
+        // TODO use heap
+        let ids_to_disconnect = properties.iter()
+            .filter(|(_,prop)| prop.timeouted(config.get_timeout()))
+            .map(|(key,_)| *key)
+            .collect_vec();
+        for conn_id in ids_to_disconnect {
+            let prop = properties.remove(&conn_id).expect("Connection is not in properties");
+            let filename = config.filename(prop.static_properties.id);
+            let filepath = Path::new(&filename);
+            if filepath.exists() {
+                std::fs::remove_file(filepath).expect(&format!("Can't delete file for timeouted connection {}", conn_id));
+            }
+            if config.is_verbose() {
+                println!("Connection {} closed because of timeout", conn_id);
+            }
+            let err_packet = Packet::from(ErrorPacket::new(conn_id));
+            let bytes_to_write = err_packet.to_bin_buff(&mut buffer, prop.static_properties.checksum_size as usize);
+            socket.send_to(&buffer[..bytes_to_write], prop.static_properties.socket_addr)
+                .expect("Can't send error packet about the timeout");
+        }
         // receive from socket
         let result = socket.recv_from(&mut buffer);
         if let Err(e) = result {
+            let kind = e.kind();
+            if kind == ErrorKind::WouldBlock || kind == ErrorKind::TimedOut {
+                continue;
+            }
             if config.is_verbose() {
                 println!("Error receiving packet, {:?}", e);
             }
@@ -64,7 +92,7 @@ pub fn logic(config: Config) -> Result<(), String> {
         if config.is_verbose() {
             println!("Packet with flag {:?}", header.flag);
         }
-        //process based on flag
+        // process based on flag
         match header.flag {
 
             // None flag ignore
@@ -163,10 +191,11 @@ pub fn logic(config: Config) -> Result<(), String> {
             }
 
             Flag::Data => {}
+
+            // Error flag
             Flag::Error => {}
-            Flag::End => {
-                break;
-            }
+
+            Flag::End => {}
         };
     };
 

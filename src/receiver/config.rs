@@ -22,7 +22,7 @@ impl Config {
             max_packet_size: 1500,
             max_window_size: 15,
             min_checksum: 16,
-            timeout: 2000,
+            timeout: 5000,
         };
     }
 
@@ -42,6 +42,9 @@ impl Config {
     }
     pub fn min_checksum_size(&self) -> u16 {
         return self.min_checksum;
+    }
+    pub fn get_timeout(&self) -> u32 {
+        return self.timeout;
     }
 
     pub fn is_verbose(&self) -> bool {
