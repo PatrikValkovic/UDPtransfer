@@ -65,7 +65,7 @@ impl Config {
             parser.refer(&mut config.timeout)
                 .add_option(&["-t", "--timeout"], Store, "Timeout after starts to resend the data");
             parser.refer(&mut config.min_checksum)
-                .add_option(&["--chhecksum"], Store, "Minimum size of checksum");
+                .add_option(&["-s", "--checksum"], Store, "Minimum size of checksum");
             parser.parse_args_or_exit();
         }
         return config;

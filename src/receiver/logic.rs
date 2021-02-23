@@ -105,8 +105,19 @@ pub fn logic(config: Config) -> Result<(), String> {
                         let props = ReceiverConnectionProperties::new(
                             ConnectionProperties::new(id, checksum_size, window_size, packet_size, received_from)
                         );
+                        if config.is_verbose() {
+                            println!("New connection {} with window_size: {}, checksum_size: {}, packet_size: {} created",
+                                     props.static_properties.id,
+                                     props.static_properties.window_size,
+                                     props.static_properties.checksum_size,
+                                     props.static_properties.packet_size
+                            );
+                        }
                         // store them
-                        properties.insert(id, props).expect("Can't insert connection properties to map");
+                        let stored = properties.insert(id, props);
+                        if let Some(_) = stored {
+                            panic!("Connection with this ID already exists");
+                        }
                         // answer the sender
                         let mut answer_packet = InitPacket::new(window_size, packet_size, checksum_size);
                         answer_packet.header.id = id;
@@ -160,96 +171,4 @@ pub fn logic(config: Config) -> Result<(), String> {
     };
 
     return Ok(());
-
-    /*let connection_properties = match connection_creation(&config, &socket) {
-        Ok(prop) => prop,
-        Err(()) => {
-            println!("Can't create connection");
-            return Err(String::from("Can't create connection"));
-        }
-    };
-
-    let mut buffer = vec![0; connection_properties.packet_size as usize];
-    loop {
-        match socket.recv_from(&mut buffer) {
-            Ok((read, from)) => {
-                if config.is_verbose() {
-                    println!("Received {}b from {}", read, from);
-                }
-                let packet = Packet::from_bin(&buffer[..read], connection_properties.checksum_size as usize);
-                match packet {
-                    Ok(packet) => {
-                        let packet = check_packet_validity(packet, connection_properties.id, &from, &connection_properties.socket_addr)?;
-                        match packet {
-                            Packet::Init(packet) => {
-                                send_init_packet_back(
-                                    connection_properties.id,
-                                    connection_properties.window_size,
-                                    connection_properties.packet_size,
-                                    connection_properties.checksum_size,
-                                    &socket,
-                                    &connection_properties.socket_addr
-                                );
-                            }
-                            Packet::Error(packet) => {
-                                return Err(String::from("Error packed received"));
-                            }
-                            Packet::End(packet) => {
-                                if config.is_verbose() {
-                                    println!("End packet received");
-                                }
-                                let answer = EndPacket::new(connection_properties.id, 0 /* TODO */);
-                                let packet = Packet::from(answer);
-                                let wrote = packet.to_bin_buff(&mut buffer, connection_properties.checksum_size as usize);
-                                socket.send_to(&buffer[..wrote], connection_properties.socket_addr);
-                                break;
-                            }
-                            Packet::Data(packet) => {
-
-                            },
-                        };
-                    }
-                    Err(ParsingError::InvalidSize(_, _)) if Flag::from_bin(&buffer[PacketHeader::flag_position()..]).unwrap() == Flag::Init => {
-                        if config.is_verbose() {
-                            println!("Received init packet again, sending connection info.")
-                        }
-                        send_init_packet_back(
-                            connection_properties.id,
-                            connection_properties.window_size,
-                            connection_properties.packet_size,
-                            connection_properties.checksum_size,
-                            &socket,
-                            &connection_properties.socket_addr
-                        );
-                    },
-                    Err(e) => {
-                        if config.is_verbose() {
-                            println!("Error parsing packed: {:?}", e);
-                        }
-                        return Err(String::from("Error parsing packet"));
-                    },
-                };
-            }
-            Err(e) => {
-                if config.is_verbose() {
-                    println!("Error receiving packet: {}", e);
-                }
-                return Err(String::from("Error receiving packet"));
-            }
-        }
-    }
-
-    return Ok(());
-     */
 }
-
-/*
-fn send_init_packet_back(connection_id: u32, window_size: u16, packet_size: u16, checksum_suze: u16, socket: &UdpSocket, addr: &SocketAddr) {
-    let mut init = InitPacket::new(window_size, packet_size, checksum_suze);
-    init.header.id = connection_id;
-    let packet = Packet::Init(init);
-    let buffer = packet.to_bin(checksum_suze as usize);
-    socket.send_to(&buffer, addr);
-}
-*/
-

@@ -1,7 +1,7 @@
 use byteorder::{NetworkEndian, ByteOrder};
 use super::{ToBin, Flag, ParsingError, PacketHeader};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct InitPacket {
     pub header: PacketHeader,
     pub window_size: u16,
@@ -46,6 +46,9 @@ impl ToBin for InitPacket {
 impl InitPacket {
     pub fn from_bin_no_size_and_hash_check(memory: &[u8]) -> Result<Self, ParsingError> {
         let header = PacketHeader::from_bin(memory)?;
+        if header.flag != Flag::Init {
+            return Err(ParsingError::InvalidFlag(header.flag.value()));
+        }
         let header_size = header.bin_size() as usize;
         let at_least_size = PacketHeader::bin_size() + 6;
         if memory.len() < at_least_size {

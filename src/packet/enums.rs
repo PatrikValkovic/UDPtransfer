@@ -22,7 +22,7 @@ pub trait ToBin: Sized {
 }
 
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Flag {
     None,
     Init,

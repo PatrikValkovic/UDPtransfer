@@ -1,7 +1,7 @@
 use byteorder::{NetworkEndian, ByteOrder};
 use super::{ToBin, Flag, ParsingError};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PacketHeader {
     pub id: u32,
     pub seq: u16,
