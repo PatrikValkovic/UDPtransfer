@@ -42,6 +42,10 @@ impl DataPacket {
             data,
         };
     }
+
+    pub fn new_receiver(connection_id: u32, seq: u16, ack: u16) -> Self {
+        return Self::new(Vec::new(), connection_id, seq, ack);
+    }
 }
 
 impl From<(Vec<u8>, u32, u16, u16)> for DataPacket {

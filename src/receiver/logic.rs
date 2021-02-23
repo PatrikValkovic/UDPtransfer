@@ -8,7 +8,7 @@ use rand::Rng;
 use itertools::Itertools;
 
 use super::config::Config;
-use crate::packet::{InitPacket, Packet, ParsingError, Flag, EndPacket, PacketHeader, ToBin, ErrorPacket};
+use crate::packet::{InitPacket, Packet, ParsingError, Flag, EndPacket, PacketHeader, ToBin, ErrorPacket, DataPacket};
 use crate::connection_properties::ConnectionProperties;
 use crate::receiver::receiver_connection_properties::ReceiverConnectionProperties;
 use std::time::Duration;
@@ -179,7 +179,59 @@ pub fn logic(config: Config) -> Result<(), String> {
                 };
             }
 
-            Flag::Data => {}
+            Flag::Data => {
+                // get connection properties
+                let conn_id = header.id;
+                let prop = properties.get(&conn_id);
+                if let None = prop {
+                    if config.is_verbose() {
+                        println!("Received data packet for connection {}, but it doesn't exists", conn_id);
+                    }
+                    continue;
+                }
+                let prop = prop.unwrap();
+                // parse packet
+                let packet = Packet::from_bin(&packet_content, prop.static_properties.checksum_size as usize);
+                match packet {
+                    Ok(Packet::Data(packet)) => {
+                        // make sure it is within window
+                        if !prop.is_withing_window(packet.header.seq) {
+                            if config.is_verbose() {
+                                println!("Data packed is not within window");
+                            }
+                            // TODO error if is too far away from the window
+                            continue;
+                        }
+                        // store it into structure
+                        let prop = properties.get_mut(&conn_id).unwrap();
+                        prop.store_data(&packet.data, packet.header.seq);
+                        // save it into file
+                        prop.save_into_file(&config);
+                        // return response
+                        let ack = prop.get_acknowledge();
+                        let packet = DataPacket::new_receiver(
+                            prop.static_properties.id,
+                            packet.header.seq,
+                            ack
+                        );
+                        let packet = Packet::from(packet);
+                        let response_size = packet.to_bin_buff(&mut buffer, prop.static_properties.checksum_size as usize);
+                        socket.send_to(&buffer[..response_size], received_from).expect("Can't repond to data packet");
+                    },
+                    Ok(_) => {
+                        if config.is_verbose() {
+                            println!("Expected data packet but something different parsed");
+                        }
+                        continue;
+                    }
+                    Err(e) => {
+                        if config.is_verbose() {
+                            println!("Error parsing data packet {:?}", e);
+                        }
+                        continue;
+                    }
+                };
+            }
 
             // Error flag
             Flag::Error => {
