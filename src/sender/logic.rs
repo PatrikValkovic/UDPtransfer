@@ -1,12 +1,12 @@
 use std::net::{UdpSocket, SocketAddr};
 use std::fs::File;
 use std::result::Result::Ok;
-use std::io::Read;
+use std::io::{Read, ErrorKind};
 use std::time::Duration;
 
 use super::config::Config;
 use super::sender_connection_properties::SenderConnectionProperties;
-use crate::packet::{Packet, InitPacket, PacketHeader, ToBin, ParsingError};
+use crate::packet::{Packet, InitPacket, PacketHeader, ToBin, ParsingError, ErrorPacket, EndPacket};
 use crate::connection_properties::ConnectionProperties;
 use std::cmp::{min, max};
 
@@ -34,11 +34,138 @@ pub fn logic(config: Config) -> Result<(), String> {
         );
     }
 
+    // prepare variables
+    let mut attempts = 0;
+    let mut buffer = vec![0; 65535];
+    // process data
     loop {
+        let content_result = socket.recv_from(&mut buffer);
+        // process errors for receive
+        if let Err(e) = content_result {
+            let kind = e.kind();
+            if kind == ErrorKind::TimedOut || kind == ErrorKind::WouldBlock {
+                println!("Recv timeout");
+                // TODO resend data
+                continue;
+            }
+            println!("Recv error: {:?}", e);
+            return Err(String::from("Can't receive data"));
+        }
+        let (recived_len, recived_from) = content_result.unwrap();
+        if config.is_verbose() {
+            println!("Received {}b of data from {}", recived_len, recived_from);
+        }
+        // read content
+        let packet = Packet::from_bin(&buffer[..recived_len], props.static_properties.checksum_size as usize);
+        match packet {
+            Err(ParsingError::ChecksumNotMatch) => {
+                if config.is_verbose() {
+                    println!("Invalid sum, ignoring")
+                }
+                continue;
+            }
+            Err(ParsingError::InvalidFlag(f)) => {
+                if config.is_verbose() {
+                    println!("Invalid flag {}, ignoring", f);
+                }
+                continue;
+            },
+            Err(ParsingError::InvalidSize(expected, actual)) => {
+                if config.is_verbose() {
+                    println!("Expected {}b but received {}b, ignoring", expected, actual);
+                }
+                continue;
+            }
+            Ok(Packet::Init(_)) | Ok(Packet::End(_)) => {
+                if config.is_verbose() {
+                    println!("End or init packet received, but hasn't been expected");
+                }
+                let error_packet = ErrorPacket::new(props.static_properties.id);
+                let answer_length = Packet::from(error_packet).to_bin_buff(&mut buffer, props.static_properties.checksum_size as usize);
+                socket.send_to(&buffer[..answer_length], config.send_addr()).expect("Can't send error packet");
+                return Err(String::from("Unexpected end packet"));
+            },
+            Ok(Packet::Error(_)) => {
+                if config.is_verbose() {
+                    println!("Error packet received");
+                }
+                println!("Failed because error packet received");
+                return Err(String::from("Error packet received"));
+            },
+            Ok(Packet::Data(packet)) => {
+                //TODO handle
+            }
+        };
+    };
 
+    // send end packet
+    let packet = Packet::from(EndPacket::new(
+        props.static_properties.id,
+        props.window_position,
+    ));
+    for _ in 0..config.repetitions() {
+        // send end packet
+        let size = packet.to_bin_buff(&mut buffer, props.static_properties.checksum_size as usize);
+        socket.send_to(&buffer[..size], props.static_properties.socket_addr);
+        // receive response
+        let recv_result = socket.recv_from(&mut buffer);
+        if let Err(e) = recv_result {
+            let kind = e.kind();
+            if kind == ErrorKind::WouldBlock || kind == ErrorKind::TimedOut {
+                if config.is_verbose() {
+                    println!("End socket timeout");
+                }
+                continue;
+            }
+            if config.is_verbose() {
+                println!("Error {:?}", e);
+            }
+            return Err(format!("Error {:?}", e));
+        };
+        let (recv_size, _) = recv_result.unwrap();
+        // parse packet
+        let packet = Packet::from_bin(&buffer[..recv_size], props.static_properties.checksum_size as usize);
+        if let Err(e) = packet {
+            if config.is_verbose() {
+                println!("Error parsing end packet {:?}", e);
+            }
+            continue;
+        }
+        let packet = packet.unwrap();
+        // handle end packet
+        match packet {
+            Packet::End(packet) => {
+                if packet.header.id != props.static_properties.id ||
+                    packet.header.seq != props.window_position {
+                    if config.is_verbose() {
+                        println!("Received invalid end packet");
+                    }
+                    let error_packet = ErrorPacket::new(props.static_properties.id);
+                    let answer_length = Packet::from(error_packet).to_bin_buff(&mut buffer, props.static_properties.checksum_size as usize);
+                    socket.send_to(&buffer[..answer_length], config.send_addr()).expect("Can't send error packet");
+                    return Err(String::from("Invalid end packet"));
+                }
+                println!("File receive confirmed");
+                return Ok(());
+            },
+            Packet::Error(_) => {
+                if config.is_verbose() {
+                    println!("Received error packet instead of end packet");
+                }
+                return Err(String::from("Error packet received"));
+            },
+            _ => {
+                if config.is_verbose() {
+                    println!("Received unexpected packet");
+                }
+                let error_packet = ErrorPacket::new(props.static_properties.id);
+                let answer_length = Packet::from(error_packet).to_bin_buff(&mut buffer, props.static_properties.checksum_size as usize);
+                socket.send_to(&buffer[..answer_length], config.send_addr()).expect("Can't send error packet");
+                return Err(String::from("Unexpected packet received"));
+            }
+        };
     }
-
-    return Ok(());
+    return Err(String::from("End packet timeout"));
 }
 
 fn create_connection(config: &Config, socket: &UdpSocket, addr: SocketAddr) -> Result<SenderConnectionProperties, ()> {
