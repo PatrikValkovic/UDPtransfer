@@ -1,14 +1,16 @@
-use std::net::{UdpSocket, SocketAddr};
+use std::net::{UdpSocket};
 use std::fs::File;
 use std::result::Result::Ok;
 use std::io::Write;
 use std::cmp::{max, min};
+use std::collections::{HashMap as PropertiesMap};
+use rand::Rng;
 use itertools::Itertools;
-use rand::random;
 
 use super::config::Config;
-use crate::connection_properties::ConnectionProperties;
 use crate::packet::{InitPacket, Packet, ParsingError, Flag, EndPacket, PacketHeader, ToBin};
+use crate::connection_properties::ConnectionProperties;
+use crate::receiver::receiver_connection_properties::ReceiverConnectionProperties;
 
 pub fn logic(config: Config) -> Result<(), String> {
     let socket = UdpSocket::bind(config.binding()).expect("Can't bind socket");
@@ -16,13 +18,17 @@ pub fn logic(config: Config) -> Result<(), String> {
         println!("Socket bind to {}", config.binding());
     }
 
+    // create structures
+    let mut random_generator = rand::thread_rng();
+    let mut properties = PropertiesMap::<u32, ReceiverConnectionProperties>::new();
+
     let mut buffer = vec![0; 65535];
     loop {
         // receive from socket
         let result = socket.recv_from(&mut buffer);
-        if let Err(E) = result {
+        if let Err(e) = result {
             if config.is_verbose() {
-                println!("Error receiving packet, {:?}", E);
+                println!("Error receiving packet, {:?}", e);
             }
             continue;
         };
@@ -40,7 +46,7 @@ pub fn logic(config: Config) -> Result<(), String> {
         let packet_content = &buffer[..packet_size];
         // parse header
         let header_result = PacketHeader::from_bin(&buffer[..PacketHeader::bin_size()]);
-        if let Err(E) = header_result {
+        if let Err(e) = header_result {
             if config.is_verbose() {
                 let header_in_bin = &buffer[..PacketHeader::bin_size()];
                 let header_in_str: String = header_in_bin.iter()
@@ -49,7 +55,7 @@ pub fn logic(config: Config) -> Result<(), String> {
                     .collect();
                 println!("Invalid header: {}; error: {:?}",
                          header_in_str,
-                         E
+                         e
                 );
             }
             continue;
@@ -73,9 +79,9 @@ pub fn logic(config: Config) -> Result<(), String> {
             Flag::Init => {
                 // Get content of init packet
                 let init_content_result = InitPacket::from_bin_no_size_and_hash_check(&buffer[..packet_size]);
-                if let Err(ref E) = init_content_result {
+                if let Err(ref e) = init_content_result {
                     if config.is_verbose() {
-                        println!("Can't get content of init packet {:?}", E);
+                        println!("Can't get content of init packet {:?}", e);
                         continue;
                     }
                 }
@@ -84,8 +90,28 @@ pub fn logic(config: Config) -> Result<(), String> {
                 let packet = Packet::from_bin(packet_content, init_content.checksum_size as usize);
                 match packet {
                     // everything OK, answer
-                    Ok(Packet::Init(InitPacket)) => {
-                        //TODO
+                    Ok(Packet::Init(_)) => {
+                        // define properties
+                        let window_size = min(init_content.window_size, config.max_window_size());
+                        let packet_size = min(init_content.packet_size, config.max_packet_size());
+                        let checksum_size = max(init_content.checksum_size, config.min_checksum_size());
+                        let id: u32 = loop {
+                            let id = random_generator.gen();
+                            if !properties.contains_key(&id) && id > 0 {
+                                break id;
+                            }
+                        };
+                        // create properties
+                        let props = ReceiverConnectionProperties::new(
+                            ConnectionProperties::new(id, checksum_size, window_size, packet_size, received_from)
+                        );
+                        // store them
+                        properties.insert(id, props).expect("Can't insert connection properties to map");
+                        // answer the sender
+                        let mut answer_packet = InitPacket::new(window_size, packet_size, checksum_size);
+                        answer_packet.header.id = id;
+                        let answer_length = Packet::from(answer_packet).to_bin_buff(&mut buffer, checksum_size as usize);
+                        socket.send_to(&buffer[..answer_length], received_from).expect("Can't answer with init packet");
                     },
                     // Not parsed init packet
                     Ok(_) => {
@@ -111,15 +137,15 @@ pub fn logic(config: Config) -> Result<(), String> {
                             config.min_checksum_size()
                         ));
                         let answer_packet_size = return_init.to_bin_buff(buffer.as_mut_slice(), config.min_checksum_size() as usize);
-                        socket.send_to(&buffer[..answer_packet_size], received_from);
+                        socket.send_to(&buffer[..answer_packet_size], received_from).expect("Can't answer with init packet after invalid size");
                         if config.is_verbose() {
                             println!("Send INIT packet back because of invalid size");
                         }
                     }
                     // Other error
-                    Err(E) => {
+                    Err(e) => {
                         if config.is_verbose() {
-                            println!("Error parsing init packet {:?}", E);
+                            println!("Error parsing init packet {:?}", e);
                         }
                     }
                 };
