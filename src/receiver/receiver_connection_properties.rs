@@ -1,7 +1,6 @@
 use std::collections::BTreeSet;
 use std::time::{Instant, Duration};
 use crate::connection_properties::ConnectionProperties;
-use std::ops::Add;
 
 pub struct ReceiverConnectionProperties {
     pub static_properties: ConnectionProperties,

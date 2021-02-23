@@ -35,18 +35,7 @@ pub fn logic(config: Config) -> Result<(), String> {
             .collect_vec();
         for conn_id in ids_to_disconnect {
             let prop = properties.remove(&conn_id).expect("Connection is not in properties");
-            let filename = config.filename(prop.static_properties.id);
-            let filepath = Path::new(&filename);
-            if filepath.exists() {
-                std::fs::remove_file(filepath).expect(&format!("Can't delete file for timeouted connection {}", conn_id));
-            }
-            if config.is_verbose() {
-                println!("Connection {} closed because of timeout", conn_id);
-            }
-            let err_packet = Packet::from(ErrorPacket::new(conn_id));
-            let bytes_to_write = err_packet.to_bin_buff(&mut buffer, prop.static_properties.checksum_size as usize);
-            socket.send_to(&buffer[..bytes_to_write], prop.static_properties.socket_addr)
-                .expect("Can't send error packet about the timeout");
+            remove_connection(&prop, &config, &mut buffer, &socket, "timeout");
         }
         // receive from socket
         let result = socket.recv_from(&mut buffer);
@@ -193,11 +182,104 @@ pub fn logic(config: Config) -> Result<(), String> {
             Flag::Data => {}
 
             // Error flag
-            Flag::Error => {}
+            Flag::Error => {
+                // get connection properties
+                let conn_id = header.id;
+                let prop = properties.get(&conn_id);
+                if let None = prop {
+                    if config.is_verbose() {
+                        println!("Received error packet for connection {}, but it doesn't exists", conn_id);
+                    }
+                    continue;
+                }
+                let prop = prop.unwrap();
+                // get packet
+                let packet = Packet::from_bin(&packet_content, prop.static_properties.checksum_size as usize);
+                match packet {
+                    Ok(Packet::Error(_)) => {
+                        let prop = properties.remove(&conn_id).expect("Can't remove connection property");
+                        remove_connection(&prop, &config, &mut buffer, &socket, "error packet");
+                        println!("Error received in connection {}", prop.static_properties.id);
+                    },
+                    Ok(_) => {
+                        if config.is_verbose() {
+                            println!("Expected error packet but something different parsed");
+                        }
+                        continue;
+                    }
+                    Err(e) => {
+                        if config.is_verbose() {
+                            println!("Error parsing error packet {:?}", e);
+                        }
+                        continue;
+                    }
+                };
+            }
 
-            Flag::End => {}
+            Flag::End => {
+                // get connection properties
+                let conn_id = header.id;
+                let prop = properties.get(&conn_id);
+                if let None = prop {
+                    if config.is_verbose() {
+                        println!("Received end packet for connection {}, but it doesn't exists", conn_id);
+                    }
+                    continue;
+                }
+                let prop = prop.unwrap();
+                // get packet
+                let packet = Packet::from_bin(&packet_content, prop.static_properties.checksum_size as usize);
+                match packet {
+                    Ok(Packet::End(packet)) => {
+                        if prop.parts_received.len() > 0 || prop.window_position != packet.header.seq {
+                            if config.is_verbose() {
+                                println!("Attempt to end packet, that has some blocks not stored");
+                            }
+                            let prop = properties.remove(&conn_id).expect("Can't remove connection properties for end packet with some data left");
+                            remove_connection(&prop, &config, &mut buffer, &socket, "end packet with some data left");
+                            continue;
+                        }
+                        let prop = properties.remove(&conn_id).expect("Can't remove connection property");
+                        let response_packet = Packet::from(EndPacket::new(conn_id, prop.window_position));
+                        let response_length = response_packet.to_bin_buff(&mut buffer, prop.static_properties.checksum_size as usize);
+                        socket.send_to(&buffer[..response_length], received_from);
+                        println!("End of connection {}", prop.static_properties.id);
+                    },
+                    Ok(_) => {
+                        if config.is_verbose() {
+                            println!("Expected end packet but something different parsed");
+                        }
+                        continue;
+                    }
+                    Err(e) => {
+                        if config.is_verbose() {
+                            println!("Error parsing end packet {:?}", e);
+                        }
+                        continue;
+                    }
+                };
+            }
         };
     };
+}
 
-    return Ok(());
+fn remove_connection(
+    prop: &ReceiverConnectionProperties,
+    config: &Config,
+    mut buffer: & mut Vec<u8>,
+    socket: &UdpSocket,
+    reason: &str,
+) {
+    let filename = config.filename(prop.static_properties.id);
+    let filepath = Path::new(&filename);
+    if filepath.exists() {
+        std::fs::remove_file(filepath).expect(&format!("Can't delete file for timeouted connection {}", prop.static_properties.id));
+    }
+    if config.is_verbose() {
+        println!("Connection {} closed because of {}", prop.static_properties.id, reason);
+    }
+    let err_packet = Packet::from(ErrorPacket::new(prop.static_properties.id));
+    let bytes_to_write = err_packet.to_bin_buff(&mut buffer, prop.static_properties.checksum_size as usize);
+    socket.send_to(&buffer[..bytes_to_write], prop.static_properties.socket_addr)
+        .expect(&format!("Can't send error packet about the {}", reason));
 }
