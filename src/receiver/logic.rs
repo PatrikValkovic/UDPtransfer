@@ -16,9 +16,7 @@ use std::path::Path;
 pub fn logic(config: Config) -> Result<(), String> {
     let socket = UdpSocket::bind(config.binding()).expect("Can't bind socket");
     socket.set_read_timeout(Some(Duration::from_millis(config.get_timeout() as u64))).expect("Can't set read timeout");
-    if config.is_verbose() {
-        println!("Socket bind to {}", config.binding());
-    }
+    config.vlog(&format!("Socket bind to {}", config.binding()));
 
     // create structures
     let mut random_generator = rand::thread_rng();
@@ -43,22 +41,16 @@ pub fn logic(config: Config) -> Result<(), String> {
             if kind == ErrorKind::WouldBlock || kind == ErrorKind::TimedOut {
                 continue;
             }
-            if config.is_verbose() {
-                println!("Error receiving packet, {:?}", e);
-            }
+            config.vlog(&format!("Error receiving packet, {:?}", e));
             continue;
         };
         // get content
         let (packet_size, received_from) = result.unwrap();
         if packet_size < PacketHeader::bin_size() {
-            if config.is_verbose() {
-                println!("Invalid packet with size {}", packet_size);
-            }
+            config.vlog(&format!("Invalid packet with size {}", packet_size));
             continue;
         }
-        if config.is_verbose() {
-            println!("Received packet of size {}", packet_size);
-        }
+        config.vlog(&format!("Received packet of size {}", packet_size));
         let packet_content = &buffer[..packet_size];
         // parse header
         let header_result = PacketHeader::from_bin(&buffer[..PacketHeader::bin_size()]);
@@ -77,17 +69,13 @@ pub fn logic(config: Config) -> Result<(), String> {
             continue;
         }
         let header = header_result.unwrap();
-        if config.is_verbose() {
-            println!("It is packet with flag {:?}", header.flag);
-        }
+        config.vlog(&format!("It is packet with flag {:?}", header.flag));
         // process based on flag
         match header.flag {
 
             // None flag ignore
             Flag::None => {
-                if config.is_verbose() {
-                    println!("Flag is not specified");
-                }
+                config.vlog("Flag is not specified");
                 continue;
             }
 
@@ -96,12 +84,16 @@ pub fn logic(config: Config) -> Result<(), String> {
                 // Get content of init packet
                 let init_content_result = InitPacket::from_bin_no_size_and_hash_check(&buffer[..packet_size]);
                 if let Err(ref e) = init_content_result {
-                    if config.is_verbose() {
-                        println!("Can't get content of init packet {:?}", e);
-                        continue;
-                    }
+                    config.vlog(&format!("Can't get content of init packet {:?}", e));
+                    continue;
                 }
                 let init_content = init_content_result.unwrap();
+                config.vlog(&format!(
+                    "Init packet properties, window size: {}, packet_size: {}, checksum: {}",
+                    init_content.window_size,
+                    init_content.packet_size,
+                    init_content.checksum_size
+                ));
                 // parse as packet
                 let packet = Packet::from_bin(packet_content, init_content.checksum_size as usize);
                 match packet {
@@ -121,17 +113,15 @@ pub fn logic(config: Config) -> Result<(), String> {
                         let props = ReceiverConnectionProperties::new(
                             ConnectionProperties::new(id, checksum_size, window_size, packet_size, received_from)
                         );
-                        if config.is_verbose() {
-                            println!("New connection {} with window_size: {}, checksum_size: {}, packet_size: {} created",
-                                     props.static_properties.id,
-                                     props.static_properties.window_size,
-                                     props.static_properties.checksum_size,
-                                     props.static_properties.packet_size
-                            );
-                        }
+                        config.vlog(&format!(
+                            "New connection {} with window_size: {}, packet_size: {}, checksum_size: {} created",
+                            props.static_properties.id,
+                            props.static_properties.window_size,
+                            props.static_properties.packet_size
+                            props.static_properties.checksum_size,
+                        ));
                         // store them
-                        let stored = properties.insert(id, props);
-                        if let Some(_) = stored {
+                        if let Some(_) = properties.insert(id, props) {
                             panic!("Connection with this ID already exists");
                         }
                         // answer the sender
@@ -139,41 +129,38 @@ pub fn logic(config: Config) -> Result<(), String> {
                         answer_packet.header.id = id;
                         let answer_length = Packet::from(answer_packet).to_bin_buff(&mut buffer, checksum_size as usize);
                         socket.send_to(&buffer[..answer_length], received_from).expect("Can't answer with init packet");
+                        config.vlog("Answer init packet send");
                     },
                     // Not parsed init packet
                     Ok(_) => {
-                        if config.is_verbose() {
-                            println!("Expected init packet, but parsed something different");
-                        }
+                        config.vlog("Expected init packet, but parsed something different");
                     }
                     // Checksum not match, can't infer content
                     Err(ParsingError::ChecksumNotMatch) => {
-                        if config.is_verbose() {
-                            println!("Checksum of init packet not match, ignoring");
-                        }
+                        config.vlog("Checksum of init packet not match, ignoring");
                     }
                     // Received smaller packet, therefore checksum (and validity of data) can't be checked
                     // Answer with receiver setting and let sender ask once again
                     Err(ParsingError::InvalidSize(expect, actual)) => {
-                        if config.is_verbose() {
-                            println!("Expected init packet of size {}, but received {}", expect, actual);
-                        }
-                        let return_init = Packet::from(InitPacket::new(
+                        config.vlog(&format!("Expected init packet of size {}, but received {}", expect, actual));
+                        let return_init = InitPacket::new(
                             config.max_window_size(),
                             min(config.max_packet_size(), packet_size as u16),
                             config.min_checksum_size()
+                        );
+                        config.vlog(&format!(
+                            "Return init packet with properties, window size: {}, packet_size: {}, checksum: {}",
+                            return_init.window_size,
+                            return_init.packet_size,
+                            return_init.checksum_size
                         ));
                         let answer_packet_size = return_init.to_bin_buff(buffer.as_mut_slice(), config.min_checksum_size() as usize);
                         socket.send_to(&buffer[..answer_packet_size], received_from).expect("Can't answer with init packet after invalid size");
-                        if config.is_verbose() {
-                            println!("Send INIT packet back because of invalid size");
-                        }
+                        config.vlog("Return init packet send back");
                     }
                     // Other error
                     Err(e) => {
-                        if config.is_verbose() {
-                            println!("Error parsing init packet {:?}", e);
-                        }
+                        config.vlog(&format!("Error parsing init packet {:?}", e));
                     }
                 };
             }
@@ -183,9 +170,7 @@ pub fn logic(config: Config) -> Result<(), String> {
                 let conn_id = header.id;
                 let prop = properties.get(&conn_id);
                 if let None = prop {
-                    if config.is_verbose() {
-                        println!("Received data packet for connection {}, but it doesn't exists", conn_id);
-                    }
+                    config.vlog(&format!("Received data packet for connection {}, but it doesn't exists", conn_id));
                     continue;
                 }
                 let prop = prop.unwrap();
@@ -195,9 +180,7 @@ pub fn logic(config: Config) -> Result<(), String> {
                     Ok(Packet::Data(packet)) => {
                         // make sure it is within window
                         if !prop.is_withing_window(packet.header.seq) {
-                            if config.is_verbose() {
-                                println!("Data packed is not within window");
-                            }
+                            config.vlog("Data packed is not within window");
                             // TODO error if is too far away from the window
                             continue;
                         }
@@ -218,15 +201,11 @@ pub fn logic(config: Config) -> Result<(), String> {
                         socket.send_to(&buffer[..response_size], received_from).expect("Can't repond to data packet");
                     },
                     Ok(_) => {
-                        if config.is_verbose() {
-                            println!("Expected data packet but something different parsed");
-                        }
+                        config.vlog("Expected data packet but something different parsed");
                         continue;
                     }
                     Err(e) => {
-                        if config.is_verbose() {
-                            println!("Error parsing data packet {:?}", e);
-                        }
+                        config.vlog(&format!("Error parsing data packet {:?}", e));
                         continue;
                     }
                 };
@@ -238,9 +217,7 @@ pub fn logic(config: Config) -> Result<(), String> {
                 let conn_id = header.id;
                 let prop = properties.get(&conn_id);
                 if let None = prop {
-                    if config.is_verbose() {
-                        println!("Received error packet for connection {}, but it doesn't exists", conn_id);
-                    }
+                    config.vlog(&format!("Received error packet for connection {}, but it doesn't exists", conn_id));
                     continue;
                 }
                 let prop = prop.unwrap();
@@ -253,15 +230,11 @@ pub fn logic(config: Config) -> Result<(), String> {
                         println!("Error received in connection {}", prop.static_properties.id);
                     },
                     Ok(_) => {
-                        if config.is_verbose() {
-                            println!("Expected error packet but something different parsed");
-                        }
+                        config.vlog("Expected error packet but something different parsed");
                         continue;
                     }
                     Err(e) => {
-                        if config.is_verbose() {
-                            println!("Error parsing error packet {:?}", e);
-                        }
+                        config.vlog(&format!("Error parsing error packet {:?}", e));
                         continue;
                     }
                 };
@@ -272,9 +245,7 @@ pub fn logic(config: Config) -> Result<(), String> {
                 let conn_id = header.id;
                 let prop = properties.get(&conn_id);
                 if let None = prop {
-                    if config.is_verbose() {
-                        println!("Received end packet for connection {}, but it doesn't exists", conn_id);
-                    }
+                    config.vlog(&format!("Received end packet for connection {}, but it doesn't exists", conn_id));
                     continue;
                 }
                 let prop = prop.unwrap();
@@ -283,9 +254,7 @@ pub fn logic(config: Config) -> Result<(), String> {
                 match packet {
                     Ok(Packet::End(packet)) => {
                         if prop.parts_received.len() > 0 || prop.window_position != packet.header.seq {
-                            if config.is_verbose() {
-                                println!("Attempt to end packet, that has some blocks not stored");
-                            }
+                            config.vlog("Attempt to end packet, that has some blocks not stored");
                             let prop = properties.remove(&conn_id).expect("Can't remove connection properties for end packet with some data left");
                             remove_connection(&prop, &config, &mut buffer, &socket, "end packet with some data left");
                             continue;
@@ -297,15 +266,11 @@ pub fn logic(config: Config) -> Result<(), String> {
                         println!("End of connection {}", prop.static_properties.id);
                     },
                     Ok(_) => {
-                        if config.is_verbose() {
-                            println!("Expected end packet but something different parsed");
-                        }
+                        config.vlog("Expected end packet but something different parsed");
                         continue;
                     }
                     Err(e) => {
-                        if config.is_verbose() {
-                            println!("Error parsing end packet {:?}", e);
-                        }
+                        config.vlog(&format!("Error parsing end packet {:?}", e));
                         continue;
                     }
                 };
@@ -325,12 +290,16 @@ fn remove_connection(
     let filepath = Path::new(&filename);
     if filepath.exists() {
         std::fs::remove_file(filepath).expect(&format!("Can't delete file for timeouted connection {}", prop.static_properties.id));
+        config.vlog(&format!("Deleted file {}", filename));
     }
-    if config.is_verbose() {
-        println!("Connection {} closed because of {}", prop.static_properties.id, reason);
-    }
+    config.vlog(&format!("Connection {} closed because of {}", prop.static_properties.id, reason));
     let err_packet = Packet::from(ErrorPacket::new(prop.static_properties.id));
     let bytes_to_write = err_packet.to_bin_buff(&mut buffer, prop.static_properties.checksum_size as usize);
     socket.send_to(&buffer[..bytes_to_write], prop.static_properties.socket_addr)
         .expect(&format!("Can't send error packet about the {}", reason));
+    config.vlog(&format!(
+        "Error packet to {} with connection id {} send",
+        prop.static_properties.socket_addr,
+        prop.static_properties.id
+    ));
 }

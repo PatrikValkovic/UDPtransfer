@@ -17,6 +17,7 @@ pub struct SenderConnectionProperties {
     pub static_properties: ConnectionProperties,
     pub window_position: u16,
     loaded_parts: BTreeMap<u16, Part>,
+    read_whole: bool,
 }
 
 impl SenderConnectionProperties {
@@ -25,7 +26,12 @@ impl SenderConnectionProperties {
             static_properties: props,
             window_position: 0,
             loaded_parts: BTreeMap::new(),
+            read_whole: false,
         }
+    }
+
+    pub fn is_complete(&self) -> bool {
+        return self.read_whole && self.loaded_parts.len() == 0;
     }
 
     fn is_within_window(&self, ack: u16) -> bool {
@@ -63,7 +69,7 @@ impl SenderConnectionProperties {
                 self.window_position,
             );
             let response_size = Packet::from(data_packet).to_bin_buff(&mut buffer, self.static_properties.checksum_size as usize);
-            socket.send_to(&buffer[..response_size], self.static_properties.socket_addr);
+            socket.send_to(&buffer[..response_size], self.static_properties.socket_addr).expect("Can't send part of data");
         }
     }
 

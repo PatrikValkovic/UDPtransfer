@@ -40,31 +40,30 @@ impl Config {
     pub fn filename(&self) -> &str {
         return &self.file;
     }
-
     pub fn max_packet_size(&self) -> u16 {
         return self.packet_size;
     }
-
     pub fn is_verbose(&self) -> bool {
         return self.verbose;
     }
-
     pub fn timeout(&self) -> u32 {
         return self.timeout;
     }
-
     pub fn window_size(&self) -> u16 {
         return self.window_size;
     }
-
     pub fn repetitions(&self) -> u16 {
         return self.repetition;
     }
-
     pub fn checksum_size(&self) -> u16 {
         return self.sum_size;
     }
 
+    pub fn vlog(&self, text: &str) {
+        if self.verbose {
+            println!("{}", text);
+        }
+    }
 
     pub fn from_command_line() -> Self {
         let mut config = Config::new();

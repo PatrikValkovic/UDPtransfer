@@ -46,9 +46,14 @@ impl Config {
     pub fn get_timeout(&self) -> u32 {
         return self.timeout;
     }
-
     pub fn is_verbose(&self) -> bool {
         return self.verbose;
+    }
+
+    pub fn vlog(&self, text: &str){
+        if self.is_verbose() {
+            println!("{}", text);
+        }
     }
 
     pub fn from_command_line() -> Self {
