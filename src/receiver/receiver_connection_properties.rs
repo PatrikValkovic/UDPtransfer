@@ -1,28 +1,29 @@
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 use std::time::{Instant, Duration};
 use crate::connection_properties::ConnectionProperties;
 use crate::receiver::config::Config;
 use std::fs::{File, OpenOptions};
 use std::path::Path;
 use std::io::Write;
+use std::num::Wrapping;
+
 
 pub struct ReceiverConnectionProperties {
     pub static_properties: ConnectionProperties,
     pub window_position: u16,
-    pub window_buffer: Vec<u8>,
-    pub parts_received: BTreeSet<u16>,
+    pub last_write_position: u16,
+    pub parts_received: BTreeMap<u16, Vec<u8>>,
     pub last_receive_time: Instant,
     file: Option<File>,
 }
 
 impl ReceiverConnectionProperties {
     pub fn new(conn_props: ConnectionProperties) -> Self {
-        let buffer_length = (conn_props.window_size * (conn_props.packet_size - conn_props.checksum_size)) as usize;
         Self {
             static_properties: conn_props,
+            last_write_position: 0,
             window_position: 0,
-            window_buffer: vec![0; buffer_length],
-            parts_received: BTreeSet::new(),
+            parts_received: BTreeMap::new(),
             last_receive_time: Instant::now(),
             file: None,
         }
@@ -33,59 +34,76 @@ impl ReceiverConnectionProperties {
         return self.last_receive_time < threshold_time;
     }
 
-    pub fn is_withing_window(&self, seq: u16) -> bool {
-        if self.window_position + self.static_properties.window_size < self.window_position {
-            return seq >= self.window_position || seq < self.window_position + self.static_properties.window_size;
+    pub fn is_within_window(&self, ack: u16, config: &Config) -> bool {
+        let window_start = Wrapping(self.window_position);
+        let window_end = window_start + Wrapping(self.static_properties.window_size);
+        let is_within: bool;
+        if window_start < window_end {
+            is_within = ack >= self.window_position && ack < self.window_position + self.static_properties.window_size;
         }
         else {
-            return self.window_position <= seq && seq < self.window_position + self.static_properties.window_size;
+            is_within = self.window_position <= ack && ack < self.window_position + self.static_properties.window_size;
         }
+        config.vlog(&format!(
+            "Check whether {} is within window starting at {} of size {}: {}",
+            ack,
+            self.window_position,
+            self.static_properties.window_size,
+            is_within
+        ));
+        return is_within;
     }
 
-    fn position_in_window(&self, seq: u16) -> u16 {
-        if seq >= self.window_position {
-            return seq - self.window_position;
+    pub fn store_data(&mut self, data: &Vec<u8>,seq: u16, config: &Config) {
+        // validate if data are within window
+        if !self.is_within_window(seq, &config) {
+            config.vlog("Not storing data, as they are outside of the window");
+            return;
         }
-        else {
-            return self.static_properties.packet_size - self.window_position + seq;
+        // store them
+        self.parts_received.insert(seq, Clone::clone(data));
+        config.vlog(&format!(
+            "Connection {} stored {}b of data under seq {}",
+            self.static_properties.id,
+            data.len(),
+            seq
+        ));
+        // move window if necessary
+        while self.parts_received.contains_key(&self.window_position){
+            let new_pos = Wrapping(seq) + Wrapping::<u16>(1);
+            self.window_position = new_pos.0;
         }
-    }
-
-    pub fn store_data(&mut self, data: &Vec<u8>,seq: u16) {
-        let pos_in_window = self.position_in_window(seq);
-        self.parts_received.insert(pos_in_window);
-        let data_length = self.static_properties.packet_size - self.static_properties.checksum_size;
-        let data_length = data_length as usize;
-        let pos_in_window = pos_in_window as usize;
-        let buffer_storage = &mut self.window_buffer[pos_in_window*data_length..pos_in_window*data_length+data.len()];
-        buffer_storage.copy_from_slice(data.as_slice());
+        config.vlog(&format!(
+            "Window moved to position {} for connection {}",
+            self.window_position,
+            self.static_properties.id
+        ));
     }
 
     pub fn save_into_file(&mut self, config: &Config) {
         let path_str = config.filename(self.static_properties.id);
         let path = Path::new(&path_str);
-        let data_length = self.static_properties.packet_size - self.static_properties.checksum_size;
-        let data_length = data_length as usize;
-        while self.parts_received.contains(&self.window_position) {
-            let mut file = OpenOptions::new().write(true)
-                .append(true)
-                .create(true)
-                .open(path).expect("Can't open file for write");
-            file.write(&self.window_buffer[..data_length]).expect("Can't write to the file");
-            if !self.parts_received.remove(&self.window_position){
-                panic!("Can't remove packet content from the window tree");
-            };
-            for i in 1..self.static_properties.window_size as usize {
-                self.window_buffer.copy_within(
-                    i*data_length..(i+1)*data_length,
-                    (i-1)*data_length
-                );
-            }
-            self.window_position += 1;
+
+        let mut file = OpenOptions::new().write(true)
+            .append(true)
+            .create(true)
+            .open(path).expect("Can't open file for write");
+        while self.last_write_position < self.window_position {
+            let buffer = self.parts_received.remove(&self.last_write_position).expect("Part to write is not within the map");
+            let wrote = file.write(&buffer).expect("Can't write to the output file");
+            config.vlog(&format!(
+               "Connection {} wrote {}b into file for packet seq {}",
+                self.static_properties.id,
+                wrote,
+                self.last_write_position
+            ));
+            let new_write_pos = Wrapping(self.last_write_position) + Wrapping::<u16>(1);
+            self.last_write_position = new_write_pos.0;
         }
     }
 
     pub fn get_acknowledge(&self) -> u16 {
-        return self.window_position;
+        let ack = Wrapping(self.window_position) - Wrapping::<u16>(1);
+        return ack.0;
     }
 }

@@ -117,7 +117,7 @@ pub fn logic(config: Config) -> Result<(), String> {
                             "New connection {} with window_size: {}, packet_size: {}, checksum_size: {} created",
                             props.static_properties.id,
                             props.static_properties.window_size,
-                            props.static_properties.packet_size
+                            props.static_properties.packet_size,
                             props.static_properties.checksum_size,
                         ));
                         // store them
@@ -154,7 +154,7 @@ pub fn logic(config: Config) -> Result<(), String> {
                             return_init.packet_size,
                             return_init.checksum_size
                         ));
-                        let answer_packet_size = return_init.to_bin_buff(buffer.as_mut_slice(), config.min_checksum_size() as usize);
+                        let answer_packet_size = Packet::from(return_init).to_bin_buff(buffer.as_mut_slice(), config.min_checksum_size() as usize);
                         socket.send_to(&buffer[..answer_packet_size], received_from).expect("Can't answer with init packet after invalid size");
                         config.vlog("Return init packet send back");
                     }
@@ -178,17 +178,25 @@ pub fn logic(config: Config) -> Result<(), String> {
                 let packet = Packet::from_bin(&packet_content, prop.static_properties.checksum_size as usize);
                 match packet {
                     Ok(Packet::Data(packet)) => {
-                        // make sure it is within window
-                        if !prop.is_withing_window(packet.header.seq) {
-                            config.vlog("Data packed is not within window");
-                            // TODO error if is too far away from the window
-                            continue;
-                        }
-                        // store it into structure
+                        config.vlog(&format!(
+                            "Data packet for {} with seq {} and {}b of data, window at {} with size {}",
+                            prop.static_properties.id,
+                            packet.header.seq,
+                            packet.data.len(),
+                            prop.window_position,
+                            prop.static_properties.window_size
+                        ));
                         let prop = properties.get_mut(&conn_id).unwrap();
-                        prop.store_data(&packet.data, packet.header.seq);
-                        // save it into file
-                        prop.save_into_file(&config);
+                        // make sure it is within window
+                        if !prop.is_within_window(packet.header.seq, &config) {
+                            config.vlog("Data packed is not within window");
+                        }
+                        else {
+                            // store it into structure
+                            prop.store_data(&packet.data, packet.header.seq, &config);
+                            // save it into file
+                            prop.save_into_file(&config);
+                        }
                         // return response
                         let ack = prop.get_acknowledge();
                         let packet = DataPacket::new_receiver(
@@ -196,9 +204,11 @@ pub fn logic(config: Config) -> Result<(), String> {
                             packet.header.seq,
                             ack
                         );
+                        config.vlog(&format!("Answer with ack {}", packet.header.ack));
                         let packet = Packet::from(packet);
                         let response_size = packet.to_bin_buff(&mut buffer, prop.static_properties.checksum_size as usize);
                         socket.send_to(&buffer[..response_size], received_from).expect("Can't repond to data packet");
+                        config.vlog("Answer data packet send");
                     },
                     Ok(_) => {
                         config.vlog("Expected data packet but something different parsed");

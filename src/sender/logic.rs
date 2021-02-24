@@ -23,20 +23,20 @@ pub fn logic(config: Config) -> Result<(), String> {
     let mut props = SenderConnectionProperties::new(
       props,
     );
-    props.load_window(&mut input_file);
     config.vlog(&format!("Connection {} established, window_size: {}, packet_size: {}, checksum_size: {}",
                          props.static_properties.id,
                          props.static_properties.window_size,
                          props.static_properties.packet_size,
                          props.static_properties.checksum_size));
-
+    props.load_window(&mut input_file, &config);
     // prepare variables
     let mut attempts = 0;
     let mut buffer = vec![0; 65535];
     // process data
-    loop {
+    while attempts < config.repetitions() && !props.is_complete() {
+        attempts += 1;
         // send content from the window
-        props.load_window(&mut input_file);
+        props.load_window(&mut input_file, &config);
         props.send_data(&socket, &config);
         // receive response
         let content_result = socket.recv_from(&mut buffer);
@@ -80,19 +80,24 @@ pub fn logic(config: Config) -> Result<(), String> {
                 return Err(String::from("Error packet received"));
             },
             Ok(Packet::Data(packet)) => {
-                props.acknowledge(packet.header.ack);
-                if props.is_complete() {
-                    break;
+                if props.acknowledge(packet.header.ack, &config) {
+                    attempts = 0;
                 }
             }
         };
     };
+
+    if attempts == config.repetitions() {
+        config.vlog(&format!("Connection lost after {} attempts", attempts));
+        return Err(format!("Connection lost after {} attemps", attempts));
+    }
 
     // send end packet
     let packet = Packet::from(EndPacket::new(
         props.static_properties.id,
         props.window_position,
     ));
+    config.vlog("All data send");
     for _ in 0..config.repetitions() {
         // send end packet
         let size = packet.to_bin_buff(&mut buffer, props.static_properties.checksum_size as usize);
@@ -155,8 +160,9 @@ fn create_connection(config: &Config, socket: &UdpSocket, addr: SocketAddr) -> R
         config.checksum_size()
     );
 
-    for _ in 0..config.repetitions() {
+    for a in 0..config.repetitions() {
         // send packet
+        config.vlog(&format!("Attempt {} to establish connection", a+1));
         let packet = Packet::from(Clone::clone(&init_packet));
         let wrote = packet.to_bin_buff(&mut buffer, init_packet.checksum_size as usize);
         socket.send_to(&buffer[..wrote], addr).expect("Can't send data and establish init connection");

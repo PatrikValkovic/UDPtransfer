@@ -31,7 +31,7 @@ impl Config {
     }
 
     pub fn filename(&self, connection_id: u32) -> String {
-        return String::from(&self.directory).add("/").add(&connection_id.to_string());
+        return String::from(&self.directory).add("\\").add(&connection_id.to_string());
     }
 
     pub fn max_packet_size(&self) -> u16 {
