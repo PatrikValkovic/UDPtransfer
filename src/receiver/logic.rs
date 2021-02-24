@@ -1,5 +1,4 @@
 use std::net::{UdpSocket};
-use std::fs::File;
 use std::result::Result::Ok;
 use std::io::ErrorKind;
 use std::cmp::{max, min};
@@ -79,7 +78,7 @@ pub fn logic(config: Config) -> Result<(), String> {
         }
         let header = header_result.unwrap();
         if config.is_verbose() {
-            println!("Packet with flag {:?}", header.flag);
+            println!("It is packet with flag {:?}", header.flag);
         }
         // process based on flag
         match header.flag {
@@ -294,7 +293,7 @@ pub fn logic(config: Config) -> Result<(), String> {
                         let prop = properties.remove(&conn_id).expect("Can't remove connection property");
                         let response_packet = Packet::from(EndPacket::new(conn_id, prop.window_position));
                         let response_length = response_packet.to_bin_buff(&mut buffer, prop.static_properties.checksum_size as usize);
-                        socket.send_to(&buffer[..response_length], received_from);
+                        socket.send_to(&buffer[..response_length], received_from).expect("Can't send end packet");
                         println!("End of connection {}", prop.static_properties.id);
                     },
                     Ok(_) => {

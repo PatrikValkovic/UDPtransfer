@@ -22,9 +22,12 @@ pub fn logic(config: Config) -> Result<(), String> {
         println!("Socket bind to {}", config.bind_addr());
     }
     socket.set_read_timeout(Option::Some(Duration::from_millis(config.timeout() as u64))).expect("Can't set timeout on the socket");
-
     // init connection
     let props = create_connection(&config, &socket, config.send_addr()).expect("Can't create init connection");
+    let mut props = SenderConnectionProperties::new(
+      props,
+    );
+    props.load_window(&mut input_file);
     if config.is_verbose() {
         println!("Connection {} established, window_size: {}, packet_size: {}, checksum_size: {}",
                  props.static_properties.id,
@@ -39,13 +42,16 @@ pub fn logic(config: Config) -> Result<(), String> {
     let mut buffer = vec![0; 65535];
     // process data
     loop {
+        // send content from the window
+        props.load_window(&mut input_file);
+        props.send_data(&socket, &config);
+        // receive response
         let content_result = socket.recv_from(&mut buffer);
         // process errors for receive
         if let Err(e) = content_result {
             let kind = e.kind();
             if kind == ErrorKind::TimedOut || kind == ErrorKind::WouldBlock {
                 println!("Recv timeout");
-                // TODO resend data
                 continue;
             }
             println!("Recv error: {:?}", e);
@@ -93,7 +99,7 @@ pub fn logic(config: Config) -> Result<(), String> {
                 return Err(String::from("Error packet received"));
             },
             Ok(Packet::Data(packet)) => {
-                //TODO handle
+                props.acknowledge(packet.header.ack);
             }
         };
     };
@@ -168,7 +174,7 @@ pub fn logic(config: Config) -> Result<(), String> {
     return Err(String::from("End packet timeout"));
 }
 
-fn create_connection(config: &Config, socket: &UdpSocket, addr: SocketAddr) -> Result<SenderConnectionProperties, ()> {
+fn create_connection(config: &Config, socket: &UdpSocket, addr: SocketAddr) -> Result<ConnectionProperties, ()> {
     let mut buffer = vec![0; 65535];
     // create my init packet
     let mut init_packet = InitPacket::new(
@@ -226,15 +232,13 @@ fn create_connection(config: &Config, socket: &UdpSocket, addr: SocketAddr) -> R
                     }
                     continue;
                 }
-                return Ok(SenderConnectionProperties::new(
-                    ConnectionProperties::new(
+                return Ok(ConnectionProperties::new(
                         packet.header.id,
                         init_packet.checksum_size,
                         init_packet.window_size,
                         init_packet.packet_size,
                         received_from
-                    )
-                ));
+                    ));
             }
             Ok(_) => {
                 if config.is_verbose() {
