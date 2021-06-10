@@ -1,7 +1,7 @@
 use udp_transfer::{receiver, sender, broker};
 use std::thread;
 use std::fs::{File, read_dir, remove_file, remove_dir_all, create_dir_all};
-use rand::{Rng};
+use rand::{RngCore};
 use std::io::{Write, Read};
 use std::time::Duration;
 use itertools::zip;
@@ -24,9 +24,7 @@ fn forced_smaller_size(){
         let mut file = File::create(SOURCE_FILE).unwrap();
         let mut rng = rand::thread_rng();
         let mut buffer = vec![0; FILE_SIZE];
-        for f in buffer.as_mut_slice() {
-            *f = rng.gen::<u8>();
-        }
+        rng.fill_bytes(&mut buffer);
         file.write_all(&buffer).unwrap();
     }
 
@@ -70,9 +68,9 @@ fn forced_smaller_size(){
             packet_size: 1500,
             send_addr: String::from(BROKER_SEND_PART),
             window_size: 15,
-            timeout: 5000,
+            timeout: 100,
             repetition: 10,
-            sum_size: 64
+            sum_size: 0
         };
         sender::logic::logic(sc).unwrap();
     }).unwrap();

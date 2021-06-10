@@ -8,7 +8,7 @@ use itertools::zip;
 
 //TODO failing
 #[test]
-fn with_drop(){
+fn everything(){
     const SOURCE_FILE: &str = "somefile.txt";
     const TARGET_DIR: &str = "./received";
     const FILE_SIZE: usize = 2 * 1024 * 1024;
@@ -37,9 +37,9 @@ fn with_drop(){
             verbose: false,
             bindaddr: String::from(RECEIVED_ADDR),
             directory: String::from(TARGET_DIR),
-            max_packet_size: 1500,
+            max_packet_size: 1000,
             max_window_size: 15,
-            min_checksum: 0,
+            min_checksum: 64,
             timeout: 5000
         };
         receiver::logic::logic(rc).unwrap();
@@ -53,11 +53,11 @@ fn with_drop(){
             sender_addr: String::from(SENDER_ADDR),
             receiver_bindaddr: String::from(BROKER_RECV_PART),
             receiver_addr: String::from(RECEIVED_ADDR),
-            packet_size: 1500,
-            delay_mean: 0.0,
-            delay_std: 0.0,
-            drop_rate: 0.2,
-            modify_prob: 0.0
+            packet_size: 100,
+            delay_mean: 150.0,
+            delay_std: 20.0,
+            drop_rate: 0.1,
+            modify_prob: 0.001
         };
         broker::logic::broker(bc);
     }).unwrap();
@@ -68,11 +68,11 @@ fn with_drop(){
             verbose: false,
             bind_addr: String::from(SENDER_ADDR),
             file: String::from(SOURCE_FILE),
-            packet_size: 1500,
+            packet_size: 2000,
             send_addr: String::from(BROKER_SEND_PART),
-            window_size: 15,
+            window_size: 20,
             timeout: 100,
-            repetition: 10,
+            repetition: 40,
             sum_size: 0
         };
         sender::logic::logic(sc).unwrap();

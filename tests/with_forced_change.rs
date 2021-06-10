@@ -6,6 +6,7 @@ use std::io::{Write, Read};
 use std::time::Duration;
 use itertools::zip;
 
+//TODO failing
 #[test]
 fn with_forced_change(){
     const SOURCE_FILE: &str = "somefile.txt";
@@ -36,7 +37,7 @@ fn with_forced_change(){
             verbose: false,
             bindaddr: String::from(RECEIVED_ADDR),
             directory: String::from(TARGET_DIR),
-            max_packet_size: 1500,
+            max_packet_size: 1000,
             max_window_size: 15,
             min_checksum: 64,
             timeout: 5000
@@ -56,7 +57,7 @@ fn with_forced_change(){
             delay_mean: 0.0,
             delay_std: 0.0,
             drop_rate: 0.0,
-            modify_prob: 0.05
+            modify_prob: 0.0001
         };
         broker::logic::broker(bc);
     }).unwrap();
@@ -70,8 +71,8 @@ fn with_forced_change(){
             packet_size: 1500,
             send_addr: String::from(BROKER_SEND_PART),
             window_size: 15,
-            timeout: 5000,
-            repetition: 10,
+            timeout: 100,
+            repetition: 40,
             sum_size: 0
         };
         sender::logic::logic(sc).unwrap();

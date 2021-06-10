@@ -44,7 +44,7 @@ impl SenderConnectionProperties {
             is_within = ack >= self.window_position && ack < self.window_position + self.static_properties.window_size;
         }
         else {
-            is_within = self.window_position <= ack && ack < self.window_position + self.static_properties.window_size;
+            is_within = self.window_position <= ack || ack < window_end.0;
         }
         config.vlog(&format!(
             "Check whether {} is within window starting at {} of size {}: {}",

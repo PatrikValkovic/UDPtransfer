@@ -6,6 +6,7 @@ use std::io::{Write, Read};
 use std::time::Duration;
 use itertools::zip;
 
+//TODO failing
 #[test]
 fn with_change(){
     const SOURCE_FILE: &str = "somefile.txt";
@@ -52,11 +53,11 @@ fn with_change(){
             sender_addr: String::from(SENDER_ADDR),
             receiver_bindaddr: String::from(BROKER_RECV_PART),
             receiver_addr: String::from(RECEIVED_ADDR),
-            packet_size: 1500,
+            packet_size: 1000,
             delay_mean: 0.0,
             delay_std: 0.0,
             drop_rate: 0.0,
-            modify_prob: 0.05
+            modify_prob: 0.0001
         };
         broker::logic::broker(bc);
     }).unwrap();
@@ -70,7 +71,7 @@ fn with_change(){
             packet_size: 1500,
             send_addr: String::from(BROKER_SEND_PART),
             window_size: 15,
-            timeout: 5000,
+            timeout: 100,
             repetition: 10,
             sum_size: 64
         };

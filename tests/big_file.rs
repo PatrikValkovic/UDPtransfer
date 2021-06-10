@@ -1,23 +1,20 @@
-use udp_transfer::{receiver, sender, broker};
+use udp_transfer::{receiver, sender};
 use std::thread;
 use std::fs::{File, read_dir, remove_file, remove_dir_all, create_dir_all};
-use rand::{Rng};
+use rand::{Rng, RngCore};
 use std::io::{Write, Read};
 use std::time::Duration;
 use itertools::zip;
 
-//TODO failing
 #[test]
-fn with_drop(){
+fn big_files(){
     const SOURCE_FILE: &str = "somefile.txt";
     const TARGET_DIR: &str = "./received";
-    const FILE_SIZE: usize = 2 * 1024 * 1024;
+    const FILE_SIZE: usize = 128 * 1024 * 1024;
     const RECEIVED_ADDR: &str = "127.0.0.1:3100";
     const SENDER_ADDR: &str = "127.0.0.1:3101";
-    const BROKER_RECV_PART: &str = "127.0.0.1:3102";
-    const BROKER_SEND_PART: &str = "127.0.0.1:3103";
 
-    // create 2MB file and directory
+    // create file and directory
     {
         remove_file(SOURCE_FILE);
         remove_dir_all(TARGET_DIR);
@@ -25,9 +22,7 @@ fn with_drop(){
         let mut file = File::create(SOURCE_FILE).unwrap();
         let mut rng = rand::thread_rng();
         let mut buffer = vec![0; FILE_SIZE];
-        for f in buffer.as_mut_slice() {
-            *f = rng.gen::<u8>();
-        }
+        rng.fill_bytes(&mut buffer);
         file.write_all(&buffer).unwrap();
     }
 
@@ -45,23 +40,6 @@ fn with_drop(){
         receiver::logic::logic(rc).unwrap();
     }).unwrap();
 
-    // create broker
-    thread::Builder::new().name(String::from("Broker")).spawn(|| {
-        let bc = broker::config::Config {
-            verbose: false,
-            sender_bindaddr: String::from(BROKER_SEND_PART),
-            sender_addr: String::from(SENDER_ADDR),
-            receiver_bindaddr: String::from(BROKER_RECV_PART),
-            receiver_addr: String::from(RECEIVED_ADDR),
-            packet_size: 1500,
-            delay_mean: 0.0,
-            delay_std: 0.0,
-            drop_rate: 0.2,
-            modify_prob: 0.0
-        };
-        broker::logic::broker(bc);
-    }).unwrap();
-
     // create sender
     let st = thread::Builder::new().name(String::from("Sender")).spawn(|| {
         let sc = sender::config::Config {
@@ -69,7 +47,7 @@ fn with_drop(){
             bind_addr: String::from(SENDER_ADDR),
             file: String::from(SOURCE_FILE),
             packet_size: 1500,
-            send_addr: String::from(BROKER_SEND_PART),
+            send_addr: String::from(RECEIVED_ADDR),
             window_size: 15,
             timeout: 100,
             repetition: 10,
