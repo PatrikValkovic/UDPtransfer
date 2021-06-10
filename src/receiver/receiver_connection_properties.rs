@@ -1,12 +1,12 @@
 use std::collections::BTreeMap;
-use std::time::{Instant, Duration};
-use crate::connection_properties::ConnectionProperties;
-use crate::receiver::config::Config;
 use std::fs::{File, OpenOptions};
-use std::path::Path;
 use std::io::Write;
 use std::num::Wrapping;
+use std::path::Path;
+use std::time::{Duration, Instant};
 
+use crate::connection_properties::ConnectionProperties;
+use crate::receiver::config::Config;
 
 pub struct ReceiverConnectionProperties {
     pub static_properties: ConnectionProperties,
@@ -70,7 +70,7 @@ impl ReceiverConnectionProperties {
         ));
         // move window if necessary
         while self.parts_received.contains_key(&self.window_position){
-            let new_pos = Wrapping(seq) + Wrapping::<u16>(1);
+            let new_pos = Wrapping::<u16>(self.window_position) + Wrapping::<u16>(1);
             self.window_position = new_pos.0;
         }
         config.vlog(&format!(

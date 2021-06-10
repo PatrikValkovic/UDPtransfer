@@ -1,10 +1,12 @@
-use udp_transfer::{receiver, sender, broker};
+use std::fs::{create_dir_all, File, read_dir, remove_dir_all, remove_file};
+use std::io::{Read, Write};
 use std::thread;
-use std::fs::{File, read_dir, remove_file, remove_dir_all, create_dir_all};
-use rand::{Rng};
-use std::io::{Write, Read};
 use std::time::Duration;
+
 use itertools::zip;
+use rand::Rng;
+
+use udp_transfer::{broker, receiver, sender};
 
 #[test]
 fn passthrough(){
@@ -64,7 +66,7 @@ fn passthrough(){
     // create sender
     let st = thread::Builder::new().name(String::from("Sender")).spawn(|| {
         let sc = sender::config::Config {
-            verbose: true,
+            verbose: false,
             bind_addr: String::from(SENDER_ADDR),
             file: String::from(SOURCE_FILE),
             packet_size: 1500,

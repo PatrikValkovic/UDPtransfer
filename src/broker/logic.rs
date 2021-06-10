@@ -1,19 +1,21 @@
-use std::net::{UdpSocket, SocketAddrV4};
 use std::{thread, thread::JoinHandle};
-use std::collections::BinaryHeap;
-use std::sync::{Arc, Mutex, Condvar};
 use std::{f32, u64};
+use std::cmp::min;
+use std::collections::BinaryHeap;
+use std::net::{SocketAddrV4, UdpSocket};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
-use rand::{thread_rng, Rng, distributions::Uniform};
+
+use rand::{distributions::Uniform, Rng, thread_rng};
+
 use super::config::Config;
 use super::packet_wrapper::PacketWrapper;
-use std::cmp::min;
 
 pub fn broker(config: Config) -> () {
     let send_socket = Arc::new(UdpSocket::bind(config.sender_bind()).expect("Can't bind sender socket"));
     let recv_socket = Arc::new(UdpSocket::bind(config.receiver_bind()).expect("Can't bind sender socket"));
     if config.is_verbose() {
-        println!("Sockets created");
+        println!("Sockets created --> {} <--> {} --> {}", config.sender_bind(), config.receiver_bind(), config.receiver_addr());
     };
 
     let from_sender = handle(

@@ -1,14 +1,15 @@
-use std::net::{UdpSocket, SocketAddr};
+use std::cmp::{max, min};
 use std::fs::File;
-use std::result::Result::Ok;
 use std::io::ErrorKind;
+use std::net::{SocketAddr, UdpSocket};
+use std::result::Result::Ok;
 use std::time::Duration;
+
+use crate::connection_properties::ConnectionProperties;
+use crate::packet::{EndPacket, ErrorPacket, InitPacket, Packet, PacketHeader, ParsingError};
 
 use super::config::Config;
 use super::sender_connection_properties::SenderConnectionProperties;
-use crate::packet::{Packet, InitPacket, PacketHeader, ParsingError, ErrorPacket, EndPacket};
-use crate::connection_properties::ConnectionProperties;
-use std::cmp::{min, max};
 
 pub fn logic(config: Config) -> Result<(), String> {
     // open file
@@ -34,7 +35,6 @@ pub fn logic(config: Config) -> Result<(), String> {
     let mut buffer = vec![0; 65535];
     // process data
     while attempts < config.repetitions() && !props.is_complete() {
-        attempts += 1;
         // send content from the window
         props.load_window(&mut input_file, &config);
         props.send_data(&socket, &config);
@@ -45,6 +45,8 @@ pub fn logic(config: Config) -> Result<(), String> {
             let kind = e.kind();
             if kind == ErrorKind::TimedOut || kind == ErrorKind::WouldBlock {
                 config.vlog("Recv timeout");
+                attempts += 1;
+                config.vlog(&format!("Increased number of attempts to {}", attempts));
                 continue;
             }
             config.vlog(&format!("Recv error: {:?}", e));
