@@ -4,16 +4,16 @@ use argparse::{ArgumentParser, StoreTrue, Store};
 
 #[derive(Clone)]
 pub struct Config {
-    verbose: bool,
-    sender_bindaddr: String,
-    sender_addr: String,
-    receiver_bindaddr: String,
-    receiver_addr: String,
-    packet_size: u32,
-    delay_mean: f32,
-    delay_std: f32,
-    drop_rate: f32,
-    modify_prob: f32,
+    pub verbose: bool,
+    pub sender_bindaddr: String,
+    pub sender_addr: String,
+    pub receiver_bindaddr: String,
+    pub receiver_addr: String,
+    pub packet_size: u32,
+    pub delay_mean: f32,
+    pub delay_std: f32,
+    pub drop_rate: f32,
+    pub modify_prob: f32,
 }
 
 impl Config {

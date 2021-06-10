@@ -1,4 +1,4 @@
-use udp_transfer::{receiver, sender};
+use udp_transfer::{receiver, sender, broker};
 use std::thread;
 use std::fs::{File, read_dir, remove_file, remove_dir_all, create_dir_all};
 use rand::{Rng};
@@ -7,12 +7,14 @@ use std::time::Duration;
 use itertools::zip;
 
 #[test]
-fn direct_send(){
+fn with_forced_change(){
     const SOURCE_FILE: &str = "somefile.txt";
     const TARGET_DIR: &str = "./received";
     const FILE_SIZE: usize = 2 * 1024 * 1024;
     const RECEIVED_ADDR: &str = "127.0.0.1:3100";
     const SENDER_ADDR: &str = "127.0.0.1:3101";
+    const BROKER_RECV_PART: &str = "127.0.0.1:3102";
+    const BROKER_SEND_PART: &str = "127.0.0.1:3103";
 
     // create 2MB file and directory
     {
@@ -36,10 +38,27 @@ fn direct_send(){
             directory: String::from(TARGET_DIR),
             max_packet_size: 1500,
             max_window_size: 15,
-            min_checksum: 0,
+            min_checksum: 64,
             timeout: 5000
         };
         receiver::logic::logic(rc).unwrap();
+    }).unwrap();
+
+    // create broker
+    thread::Builder::new().name(String::from("Broker")).spawn(|| {
+        let bc = broker::config::Config {
+            verbose: false,
+            sender_bindaddr: String::from(BROKER_SEND_PART),
+            sender_addr: String::from(SENDER_ADDR),
+            receiver_bindaddr: String::from(BROKER_RECV_PART),
+            receiver_addr: String::from(RECEIVED_ADDR),
+            packet_size: 1500,
+            delay_mean: 0.0,
+            delay_std: 0.0,
+            drop_rate: 0.0,
+            modify_prob: 0.05
+        };
+        broker::logic::broker(bc);
     }).unwrap();
 
     // create sender
@@ -49,7 +68,7 @@ fn direct_send(){
             bind_addr: String::from(SENDER_ADDR),
             file: String::from(SOURCE_FILE),
             packet_size: 1500,
-            send_addr: String::from(RECEIVED_ADDR),
+            send_addr: String::from(BROKER_SEND_PART),
             window_size: 15,
             timeout: 5000,
             repetition: 10,

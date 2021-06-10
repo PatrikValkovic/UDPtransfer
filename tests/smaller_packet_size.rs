@@ -7,7 +7,7 @@ use std::time::Duration;
 use itertools::zip;
 
 #[test]
-fn direct_send(){
+fn smaller_packet_size(){
     const SOURCE_FILE: &str = "somefile.txt";
     const TARGET_DIR: &str = "./received";
     const FILE_SIZE: usize = 2 * 1024 * 1024;
@@ -34,7 +34,7 @@ fn direct_send(){
             verbose: false,
             bindaddr: String::from(RECEIVED_ADDR),
             directory: String::from(TARGET_DIR),
-            max_packet_size: 1500,
+            max_packet_size: 800,
             max_window_size: 15,
             min_checksum: 0,
             timeout: 5000

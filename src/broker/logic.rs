@@ -1,12 +1,10 @@
-
 use std::net::{UdpSocket, SocketAddrV4};
-use std::thread::{JoinHandle, spawn};
+use std::{thread, thread::JoinHandle};
 use std::collections::BinaryHeap;
 use std::sync::{Arc, Mutex, Condvar};
 use std::{f32, u64};
 use std::time::Duration;
 use rand::{thread_rng, Rng, distributions::Uniform};
-
 use super::config::Config;
 use super::packet_wrapper::PacketWrapper;
 use std::cmp::min;
@@ -22,13 +20,15 @@ pub fn broker(config: Config) -> () {
         Arc::clone(&send_socket),
         Arc::clone(&recv_socket),
         config.clone(),
-        config.receiver_addr()
+        config.receiver_addr(),
+        "BrokerFromSender"
     );
     let from_receiver = handle(
         Arc::clone(&recv_socket),
         Arc::clone(&send_socket),
         config.clone(),
-        config.sender_addr()
+        config.sender_addr(),
+        "BrokerFromReceiver"
     );
 
     from_sender.join().expect("Can't join sender part");
@@ -41,14 +41,16 @@ fn handle(
     send_socket: Arc<UdpSocket>,
     config: Config,
     send_addr: SocketAddrV4,
+    threadname: &str,
 ) -> JoinHandle<()> {
-    return spawn(move || {
+    let name = String::from(threadname);
+    return thread::Builder::new().name(String::from(threadname)).spawn(move || {
         let queue = Arc::new(Mutex::new(BinaryHeap::<PacketWrapper>::new()));
         let condvar = Arc::new(Condvar::new());
 
-        sending_part(&config, &queue, &condvar, &send_socket, send_addr);
+        sending_part(&config, &queue, &condvar, &send_socket, send_addr, &name);
         receiving_part(&config, &queue, &condvar, &receive_socket);
-    });
+    }).expect(&format!("Can't create {} thread", threadname));
 }
 
 fn receiving_part(
@@ -101,13 +103,15 @@ fn sending_part(
     condvar: &Arc<Condvar>,
     socket: &Arc<UdpSocket>,
     sendaddr: SocketAddrV4,
+    threadname: &str
 ) -> JoinHandle<()> {
     let config = config.clone();
     let queue = Arc::clone(queue);
     let condvar = Arc::clone(condvar);
     let socket = Arc::clone(socket);
 
-    spawn(move || {
+    thread::Builder::new().name(String::from(format!("{}_{}", threadname, "send")))
+        .spawn(move || {
         loop {
             let to_send;
             {
@@ -137,11 +141,11 @@ fn sending_part(
             };
 
             match socket.send_to(to_send.content(), sendaddr) {
-                Ok(send_size) if config.is_verbose() => println!("Send data of size {}b", send_size),
+                Ok(send_size) if config.is_verbose() => println!("Send data of size {}b to {}", send_size, sendaddr),
                 Ok(_) => {}
                 Err(e) => eprintln!("Error sending data {}", e),
             };
         };
-    })
+    }).expect(&format!("Can't create sender part for {}", threadname))
 }
 
