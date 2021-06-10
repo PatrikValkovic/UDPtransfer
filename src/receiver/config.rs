@@ -4,13 +4,13 @@ use argparse::{ArgumentParser, StoreTrue, Store};
 use std::ops::Add;
 
 pub struct Config {
-    verbose: bool,
-    bindaddr: String,
-    directory: String,
-    max_packet_size: u16,
-    max_window_size: u16,
-    min_checksum: u16,
-    timeout: u32,
+    pub verbose: bool,
+    pub bindaddr: String,
+    pub directory: String,
+    pub max_packet_size: u16,
+    pub max_window_size: u16,
+    pub min_checksum: u16,
+    pub timeout: u32,
 }
 
 impl Config {

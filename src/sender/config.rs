@@ -3,15 +3,15 @@ use std::str::FromStr;
 use argparse::{ArgumentParser, StoreTrue, Store};
 
 pub struct Config {
-    verbose: bool,
-    bind_addr: String,
-    file: String,
-    packet_size: u16,
-    send_addr: String,
-    window_size: u16,
-    timeout: u32,
-    repetition: u16,
-    sum_size: u16,
+    pub verbose: bool,
+    pub bind_addr: String,
+    pub file: String,
+    pub packet_size: u16,
+    pub send_addr: String,
+    pub window_size: u16,
+    pub timeout: u32,
+    pub repetition: u16,
+    pub sum_size: u16,
 }
 
 impl Config {
