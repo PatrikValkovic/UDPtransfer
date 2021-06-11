@@ -13,6 +13,7 @@ struct Part {
     pub content: Vec<u8>,
     pub last_transition: Instant,
     pub seq: u16,
+    pub send: bool,
 }
 
 pub struct SenderConnectionProperties {
@@ -86,7 +87,7 @@ impl SenderConnectionProperties {
         for i in 0..min(self.static_properties.window_size, self.loaded_parts.len() as u16) {
             let current_index = Wrapping(self.window_position) + Wrapping(i);
             let part = self.loaded_parts.get_mut(&current_index.0).expect("Part is not within the map");
-            if Instant::now() - part.last_transition < Duration::from_millis(config.timeout() as u64){
+            if part.send && Instant::now() - part.last_transition < Duration::from_millis(config.timeout() as u64){
                 continue;
             }
             config.vlog(&format!(
@@ -104,6 +105,7 @@ impl SenderConnectionProperties {
             let response_size = Packet::from(data_packet).to_bin_buff(&mut buffer, self.static_properties.checksum_size as usize);
             socket.send_to(&buffer[..response_size], self.static_properties.socket_addr).expect("Can't send part of data");
             part.last_transition = Instant::now();
+            part.send = true;
             config.vlog("Data packet send");
         }
     }
@@ -138,8 +140,9 @@ impl SenderConnectionProperties {
             }
             let part = Part {
                 content: Vec::from(&buffer[..read_size]),
-                last_transition: Instant::now() - Duration::from_secs(60*60),
-                seq: load_index.0
+                last_transition: Instant::now(),
+                seq: load_index.0,
+                send: false,
             };
             config.vlog(&format!("Stored as part with seq {} and {}b of data", part.seq, part.content.len()));
             if let Some(_) = self.loaded_parts.insert(load_index.0, part){
