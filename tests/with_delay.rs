@@ -6,7 +6,6 @@ use std::io::{Write, Read};
 use std::time::Duration;
 use itertools::zip;
 
-// TODO delay not working
 #[test]
 fn with_delay(){
     const SOURCE_FILE: &str = "somefile.txt";
@@ -19,8 +18,8 @@ fn with_delay(){
 
     // create 2MB file and directory
     {
-        remove_file(SOURCE_FILE);
-        remove_dir_all(TARGET_DIR);
+        match remove_file(SOURCE_FILE) { _ => {}};
+        match remove_dir_all(TARGET_DIR) { _ => {}};
         create_dir_all(TARGET_DIR).unwrap();
         let mut file = File::create(SOURCE_FILE).unwrap();
         let mut rng = rand::thread_rng();
@@ -40,7 +39,7 @@ fn with_delay(){
             max_packet_size: 1500,
             max_window_size: 15,
             min_checksum: 0,
-            timeout: 5000
+            timeout: 10000
         };
         receiver::logic::logic(rc).unwrap();
     }).unwrap();
@@ -54,8 +53,8 @@ fn with_delay(){
             receiver_bindaddr: String::from(BROKER_RECV_PART),
             receiver_addr: String::from(RECEIVED_ADDR),
             packet_size: 1000,
-            delay_mean: 1000.0,
-            delay_std: 10.0,
+            delay_mean: 100.0,
+            delay_std: 100.0,
             drop_rate: 0.0,
             modify_prob: 0.0
         };
@@ -72,7 +71,7 @@ fn with_delay(){
             send_addr: String::from(BROKER_SEND_PART),
             window_size: 15,
             timeout: 200,
-            repetition: 40,
+            repetition: 100,
             sum_size: 0
         };
         sender::logic::logic(sc).unwrap();

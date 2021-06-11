@@ -1,6 +1,8 @@
 use std::net::{SocketAddrV4, SocketAddr};
 use std::str::FromStr;
 use argparse::{ArgumentParser, StoreTrue, Store};
+use time::OffsetDateTime;
+use crate::DATE_FORMAT_STR;
 
 pub struct Config {
     pub verbose: bool,
@@ -61,7 +63,7 @@ impl Config {
 
     pub fn vlog(&self, text: &str) {
         if self.verbose {
-            println!("{}", text);
+            println!("{}: {}", OffsetDateTime::now_utc().format(DATE_FORMAT_STR), text);
         }
     }
 

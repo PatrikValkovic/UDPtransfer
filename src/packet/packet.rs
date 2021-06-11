@@ -42,6 +42,15 @@ impl ToBin for Packet {
 }
 
 impl Packet {
+    pub fn header(&self) -> &PacketHeader {
+        return match self {
+            Packet::Init(p) => &p.header,
+            Packet::Data(p) => &p.header,
+            Packet::Error(p) => &p.header,
+            Packet::End(p) => &p.header,
+        };
+    }
+
     pub fn bin_size(&self) -> usize {
         return ToBin::bin_size(self);
     }

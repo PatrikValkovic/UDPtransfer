@@ -14,6 +14,7 @@ pub struct ReceiverConnectionProperties {
     pub next_write_position: u16,
     pub parts_received: BTreeMap<u16, Vec<u8>>,
     pub last_receive_time: Instant,
+    pub is_closed: bool,
     file: Option<File>,
 }
 
@@ -25,6 +26,7 @@ impl ReceiverConnectionProperties {
             window_position: 0,
             parts_received: BTreeMap::new(),
             last_receive_time: Instant::now(),
+            is_closed: false,
             file: None,
         }
     }

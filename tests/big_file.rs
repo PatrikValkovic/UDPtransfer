@@ -1,7 +1,7 @@
 use udp_transfer::{receiver, sender};
 use std::thread;
 use std::fs::{File, read_dir, remove_file, remove_dir_all, create_dir_all};
-use rand::{Rng, RngCore};
+use rand::RngCore;
 use std::io::{Write, Read};
 use std::time::Duration;
 use itertools::zip;
@@ -16,8 +16,8 @@ fn big_files(){
 
     // create file and directory
     {
-        remove_file(SOURCE_FILE);
-        remove_dir_all(TARGET_DIR);
+        match remove_file(SOURCE_FILE) { _ => {}};
+        match remove_dir_all(TARGET_DIR) { _ => {}};
         create_dir_all(TARGET_DIR).unwrap();
         let mut file = File::create(SOURCE_FILE).unwrap();
         let mut rng = rand::thread_rng();

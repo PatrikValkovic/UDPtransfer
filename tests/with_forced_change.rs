@@ -6,7 +6,6 @@ use std::io::{Write, Read};
 use std::time::Duration;
 use itertools::zip;
 
-//TODO failing
 #[test]
 fn with_forced_change(){
     const SOURCE_FILE: &str = "somefile.txt";
@@ -19,8 +18,8 @@ fn with_forced_change(){
 
     // create 2MB file and directory
     {
-        remove_file(SOURCE_FILE);
-        remove_dir_all(TARGET_DIR);
+        match remove_file(SOURCE_FILE) { _ => {}};
+        match remove_dir_all(TARGET_DIR) { _ => {}};
         create_dir_all(TARGET_DIR).unwrap();
         let mut file = File::create(SOURCE_FILE).unwrap();
         let mut rng = rand::thread_rng();

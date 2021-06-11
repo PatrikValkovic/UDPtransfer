@@ -54,9 +54,9 @@ pub fn logic(config: Config) -> Result<(), String> {
         }
         let (recived_len, recived_from) = content_result.unwrap();
         config.vlog(&format!("Received {}b of data from {}", recived_len, recived_from));
-        // read content
+        // read content and validate it
         let packet = Packet::from_bin(&buffer[..recived_len], props.static_properties.checksum_size as usize);
-        match packet {
+        let packet = match packet {
             Err(ParsingError::ChecksumNotMatch) => {
                 config.vlog("Invalid sum, ignoring");
                 continue;
@@ -68,20 +68,33 @@ pub fn logic(config: Config) -> Result<(), String> {
             Err(ParsingError::InvalidSize(expected, actual)) => {
                 config.vlog(&format!("Expected {}b but received {}b, ignoring", expected, actual));
                 continue;
+            },
+            Ok(packet) => {
+                if packet.header().id != props.static_properties.id {
+                    config.vlog("Wrong connection ID");
+                    continue;
+                }
+                packet
             }
-            Ok(Packet::Init(_)) | Ok(Packet::End(_)) => {
-                config.vlog("End or init packet received, but hasn't been expected");
+        };
+        match packet {
+            Packet::Init(_) => {
+                config.vlog("Init packet received, but connection already established");
+                continue;
+            }
+            Packet::End(_) => {
+                config.vlog("End packet received, but hasn't been expected");
                 let error_packet = ErrorPacket::new(props.static_properties.id);
                 let answer_length = Packet::from(error_packet).to_bin_buff(&mut buffer, props.static_properties.checksum_size as usize);
                 socket.send_to(&buffer[..answer_length], config.send_addr()).expect("Can't send error packet");
                 return Err(String::from("Unexpected end packet"));
             },
-            Ok(Packet::Error(_)) => {
+            Packet::Error(_) => {
                 config.vlog("Error packet received");
                 println!("Failed because error packet received");
                 return Err(String::from("Error packet received"));
             },
-            Ok(Packet::Data(packet)) => {
+            Packet::Data(packet) => {
                 if props.acknowledge(packet.header.ack, &config) {
                     attempts = 0;
                 }
@@ -94,25 +107,38 @@ pub fn logic(config: Config) -> Result<(), String> {
         return Err(format!("Connection lost after {} attemps", attempts));
     }
 
+    config.vlog("All data send");
     // send end packet
     let packet = Packet::from(EndPacket::new(
         props.static_properties.id,
         props.window_position,
     ));
-    config.vlog("All data send");
-    for _ in 0..config.repetitions() {
-        // send end packet
-        let size = packet.to_bin_buff(&mut buffer, props.static_properties.checksum_size as usize);
-        socket.send_to(&buffer[..size], props.static_properties.socket_addr).expect("Can't send end packet");
+    // send end packet
+    let size = packet.to_bin_buff(&mut buffer, props.static_properties.checksum_size as usize);
+    socket.send_to(&buffer[..size], props.static_properties.socket_addr).expect("Can't send end packet");
+    config.vlog("Send end packet");
+    // wait for end packet
+    attempts = 0;
+    while attempts < config.repetitions() {
         // receive response
         let recv_result = socket.recv_from(&mut buffer);
         if let Err(e) = recv_result {
             let kind = e.kind();
             if kind == ErrorKind::WouldBlock || kind == ErrorKind::TimedOut {
                 config.vlog("End socket timeout");
+                attempts += 1;
+                // send end packet
+                let packet = Packet::from(EndPacket::new(
+                    props.static_properties.id,
+                    props.window_position,
+                ));
+                // send end packet
+                let size = packet.to_bin_buff(&mut buffer, props.static_properties.checksum_size as usize);
+                socket.send_to(&buffer[..size], props.static_properties.socket_addr).expect("Can't send end packet");
+                config.vlog("Send end packet");
                 continue;
             }
-            config.vlog(&format!("Error during end packet receive {:?}", e));
+            config.vlog(&format!("Error during end packet receive {}", e.to_string()));
             return Err(format!("Error {:?}", e));
         };
         let (recv_size, _) = recv_result.unwrap();
@@ -126,8 +152,7 @@ pub fn logic(config: Config) -> Result<(), String> {
         // handle end packet
         match packet {
             Packet::End(packet) => {
-                if packet.header.id != props.static_properties.id ||
-                    packet.header.seq != props.window_position {
+                if packet.header.id != props.static_properties.id || packet.header.seq != props.window_position {
                     config.vlog("Received invalid end packet");
                     let error_packet = ErrorPacket::new(props.static_properties.id);
                     let answer_length = Packet::from(error_packet).to_bin_buff(&mut buffer, props.static_properties.checksum_size as usize);
@@ -141,6 +166,10 @@ pub fn logic(config: Config) -> Result<(), String> {
                 config.vlog("Received error packet instead of end packet");
                 return Err(String::from("Error packet received"));
             },
+            Packet::Data(_) => {
+                config.vlog("Received data packet after sending end packet, ignoring");
+                continue;
+            }
             _ => {
                 config.vlog("Received unexpected packet");
                 let error_packet = ErrorPacket::new(props.static_properties.id);
@@ -177,7 +206,7 @@ fn create_connection(config: &Config, socket: &UdpSocket, addr: SocketAddr) -> R
         // wait for answer
         let recv_result = socket.recv_from(&mut buffer);
         if let Err(e) = recv_result {
-            config.vlog(&format!("Can't receive data because of error {:?}", e));
+            config.vlog(&format!("Can't receive data because of error {}", e.to_string()));
             continue;
         };
         // get raw data

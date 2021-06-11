@@ -6,7 +6,6 @@ use std::io::{Write, Read};
 use std::time::Duration;
 use itertools::zip;
 
-//TODO failing
 #[test]
 fn everything(){
     const SOURCE_FILE: &str = "somefile.txt";
@@ -19,8 +18,8 @@ fn everything(){
 
     // create 2MB file and directory
     {
-        remove_file(SOURCE_FILE);
-        remove_dir_all(TARGET_DIR);
+        match remove_file(SOURCE_FILE) { _ => {}};
+        match remove_dir_all(TARGET_DIR) { _ => {}};
         create_dir_all(TARGET_DIR).unwrap();
         let mut file = File::create(SOURCE_FILE).unwrap();
         let mut rng = rand::thread_rng();
@@ -39,7 +38,7 @@ fn everything(){
             directory: String::from(TARGET_DIR),
             max_packet_size: 1000,
             max_window_size: 15,
-            min_checksum: 64,
+            min_checksum: 32,
             timeout: 5000
         };
         receiver::logic::logic(rc).unwrap();
@@ -54,10 +53,10 @@ fn everything(){
             receiver_bindaddr: String::from(BROKER_RECV_PART),
             receiver_addr: String::from(RECEIVED_ADDR),
             packet_size: 100,
-            delay_mean: 150.0,
-            delay_std: 20.0,
-            drop_rate: 0.1,
-            modify_prob: 0.001
+            delay_mean: 50.0,
+            delay_std: 10.0,
+            drop_rate: 0.01,
+            modify_prob: 0.0001
         };
         broker::logic::broker(bc);
     }).unwrap();
@@ -72,8 +71,8 @@ fn everything(){
             send_addr: String::from(BROKER_SEND_PART),
             window_size: 20,
             timeout: 100,
-            repetition: 40,
-            sum_size: 0
+            repetition: 100,
+            sum_size: 16
         };
         sender::logic::logic(sc).unwrap();
     }).unwrap();

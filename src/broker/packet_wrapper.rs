@@ -17,11 +17,7 @@ impl PacketWrapper {
     }
 
     pub fn send_in(&self) -> Duration {
-        if Instant::now() > self.send_at {
-            return Instant::now() - self.send_at;
-        } else {
-            return Duration::from_millis(0);
-        }
+        return self.send_at.checked_duration_since(Instant::now()).unwrap_or_else(||{Duration::from_secs(0)});
     }
 
     pub fn content(&self) -> &Vec<u8> {

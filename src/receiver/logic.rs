@@ -41,7 +41,7 @@ pub fn logic(config: Config) -> Result<(), String> {
             if kind == ErrorKind::WouldBlock || kind == ErrorKind::TimedOut {
                 continue;
             }
-            config.vlog(&format!("Error receiving packet, {:?}", e));
+            config.vlog(&format!("Error receiving packet, {}", e.to_string()));
             continue;
         };
         // get content
@@ -207,7 +207,7 @@ pub fn logic(config: Config) -> Result<(), String> {
                         config.vlog(&format!("Answer with ack {}", packet.header.ack));
                         let packet = Packet::from(packet);
                         let response_size = packet.to_bin_buff(&mut buffer, prop.static_properties.checksum_size as usize);
-                        socket.send_to(&buffer[..response_size], received_from).expect("Can't repond to data packet");
+                        socket.send_to(&buffer[..response_size], received_from).expect("Can't respond to data packet");
                         config.vlog("Answer data packet send");
                     },
                     Ok(_) => {
@@ -253,7 +253,7 @@ pub fn logic(config: Config) -> Result<(), String> {
             Flag::End => {
                 // get connection properties
                 let conn_id = header.id;
-                let prop = properties.get(&conn_id);
+                let prop = properties.get_mut(&conn_id);
                 if let None = prop {
                     config.vlog(&format!("Received end packet for connection {}, but it doesn't exists", conn_id));
                     continue;
@@ -269,11 +269,11 @@ pub fn logic(config: Config) -> Result<(), String> {
                             remove_connection(&prop, &config, &mut buffer, &socket, "end packet with some data left");
                             continue;
                         }
-                        let prop = properties.remove(&conn_id).expect("Can't remove connection property");
+                        prop.is_closed = true;
                         let response_packet = Packet::from(EndPacket::new(conn_id, prop.window_position));
                         let response_length = response_packet.to_bin_buff(&mut buffer, prop.static_properties.checksum_size as usize);
                         socket.send_to(&buffer[..response_length], received_from).expect("Can't send end packet");
-                        println!("End of connection {}", prop.static_properties.id);
+                        config.vlog(&format!("End of connection {}", prop.static_properties.id));
                     },
                     Ok(_) => {
                         config.vlog("Expected end packet but something different parsed");
@@ -296,6 +296,11 @@ fn remove_connection(
     socket: &UdpSocket,
     reason: &str,
 ) {
+    if prop.is_closed {
+        config.vlog(&format!("Connection {} definitely removed", prop.static_properties.id));
+        return;
+    }
+
     let filename = config.filename(prop.static_properties.id);
     let filepath = Path::new(&filename);
     if filepath.exists() {

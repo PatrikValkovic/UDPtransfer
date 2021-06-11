@@ -1,6 +1,8 @@
 use std::net::{SocketAddrV4};
 use std::str::FromStr;
 use argparse::{ArgumentParser, StoreTrue, Store};
+use time::OffsetDateTime;
+use crate::DATE_FORMAT_STR;
 
 #[derive(Clone)]
 pub struct Config {
@@ -62,6 +64,12 @@ impl Config {
     }
     pub fn modify_prob(&self) -> f32 {
         return self.modify_prob;
+    }
+
+    pub fn vlog(&self, text: &str){
+        if self.is_verbose() {
+            println!("{}: {}", OffsetDateTime::now_utc().format(DATE_FORMAT_STR),text);
+        }
     }
 
     pub fn from_command_line() -> Self {

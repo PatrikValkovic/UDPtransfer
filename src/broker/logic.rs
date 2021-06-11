@@ -1,5 +1,4 @@
 use std::{thread, thread::JoinHandle};
-use std::{f32, u64};
 use std::cmp::min;
 use std::collections::BinaryHeap;
 use std::net::{SocketAddrV4, UdpSocket};
@@ -14,9 +13,7 @@ use super::packet_wrapper::PacketWrapper;
 pub fn broker(config: Config) -> () {
     let send_socket = Arc::new(UdpSocket::bind(config.sender_bind()).expect("Can't bind sender socket"));
     let recv_socket = Arc::new(UdpSocket::bind(config.receiver_bind()).expect("Can't bind sender socket"));
-    if config.is_verbose() {
-        println!("Sockets created --> {} <--> {} --> {}", config.sender_bind(), config.receiver_bind(), config.receiver_addr());
-    };
+    config.vlog(&format!("Sockets created --> {} <--> {} --> {}", config.sender_bind(), config.receiver_bind(), config.receiver_addr()));
 
     let from_sender = handle(
         Arc::clone(&send_socket),
@@ -67,10 +64,15 @@ fn receiving_part(
     let byte_dist = Uniform::new(0,255);
 
     loop {
-        let (size, sender) = socket.recv_from(buff.as_mut_slice()).expect("Can't receive data");
-        if config.is_verbose() {
-            println!("Received {}b of data from {}.", size, sender);
-        }
+        let (size, sender) = match socket.recv_from(buff.as_mut_slice()) {
+            Ok(x) => x,
+            Err(e) => {
+                println!("Could not receive from socket {:?}, ignoring", socket.local_addr());
+                println!("{:?}", e);
+                continue;
+            }
+        };
+        config.vlog(&format!("Received {}b of data from {}.", size, sender));
 
         if rand_gen.sample(unif) > config.droprate() {
             let delay: f32 = f32::max(0.0, config.delay_std() * rand_gen.gen::<f32>() + config.delay_mean());
@@ -90,11 +92,9 @@ fn receiving_part(
                 queue.push(wrapper);
                 condvar.notify_one();
             }
-            if config.is_verbose() {
-                println!("Packet add to the queue");
-            }
-        } else if config.is_verbose() {
-            println!("Drop packet");
+            config.vlog(&format!("Packet add to the queue"));
+        } else {
+            config.vlog(&format!("Drop packet"));
         }
     }
 }
@@ -134,17 +134,15 @@ fn sending_part(
                 };
                 to_send = match packet {
                     Some(x) => x,
-                    None if config.is_verbose() => {
-                        println!("No item in queue");
+                    None => {
+                        config.vlog(&format!("No item in queue"));
                         continue;
                     }
-                    None => continue
                 };
             };
 
             match socket.send_to(to_send.content(), sendaddr) {
-                Ok(send_size) if config.is_verbose() => println!("Send data of size {}b to {}", send_size, sendaddr),
-                Ok(_) => {}
+                Ok(send_size) => config.vlog(&format!("Send data of size {}b to {}", send_size, sendaddr)),
                 Err(e) => eprintln!("Error sending data {}", e),
             };
         };
