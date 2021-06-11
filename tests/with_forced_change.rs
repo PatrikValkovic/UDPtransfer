@@ -9,7 +9,7 @@ use itertools::zip;
 #[test]
 fn with_forced_change(){
     const SOURCE_FILE: &str = "somefile.txt";
-    const TARGET_DIR: &str = "./received";
+    const TARGET_DIR: &str = "received";
     const FILE_SIZE: usize = 2 * 1024 * 1024;
     const RECEIVED_ADDR: &str = "127.0.0.1:3100";
     const SENDER_ADDR: &str = "127.0.0.1:3101";
@@ -71,7 +71,7 @@ fn with_forced_change(){
             send_addr: String::from(BROKER_SEND_PART),
             window_size: 15,
             timeout: 100,
-            repetition: 40,
+            repetition: 100,
             sum_size: 0
         };
         sender::logic::logic(sc).unwrap();

@@ -4,6 +4,7 @@ use argparse::{ArgumentParser, StoreTrue, Store};
 use std::ops::Add;
 use time::OffsetDateTime;
 use crate::DATE_FORMAT_STR;
+use std::path::PathBuf;
 
 pub struct Config {
     pub verbose: bool,
@@ -33,7 +34,11 @@ impl Config {
     }
 
     pub fn filename(&self, connection_id: u32) -> String {
-        return String::from(&self.directory).add("\\").add(&connection_id.to_string());
+        let mut path = PathBuf::new();
+        path.push(&self.directory);
+        path.push(connection_id.to_string());
+        let final_path = String::from(path.as_path().to_str().unwrap());
+        return final_path;
     }
 
     pub fn max_packet_size(&self) -> u16 {

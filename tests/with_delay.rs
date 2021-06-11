@@ -9,7 +9,7 @@ use itertools::zip;
 #[test]
 fn with_delay(){
     const SOURCE_FILE: &str = "somefile.txt";
-    const TARGET_DIR: &str = "./received";
+    const TARGET_DIR: &str = "received";
     const FILE_SIZE: usize = 2 * 1024 * 1024;
     const RECEIVED_ADDR: &str = "127.0.0.1:3100";
     const SENDER_ADDR: &str = "127.0.0.1:3101";
