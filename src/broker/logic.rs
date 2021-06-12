@@ -4,14 +4,32 @@ use std::collections::BinaryHeap;
 use std::net::{SocketAddrV4, UdpSocket};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
-
 use rand::{distributions::Uniform, Rng, thread_rng};
-
 use super::config::Config;
 use super::packet_wrapper::PacketWrapper;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::io::ErrorKind;
+
+/// Creates the broker.
+/// `brk` parameter should be set to `true` when the broker should terminate.
+/// Returns handler to join the thread.
+pub fn breakable_logic(config: Config, brk: Arc<AtomicBool>) -> JoinHandle<()> {
+    thread::Builder::new()
+        .name(String::from("Broker"))
+        .spawn(move || {
+            broker(config, brk);
+        }).expect("Can't create thread for the broker")
+}
+
+/// Creates the broker and keep running.
+/// There is no way how to terminate the execution.
+pub fn logic(config: Config) -> () {
+    let brk = Arc::new(AtomicBool::new(false));
+    broker(config, brk);
+}
 
 /// Creates the broker and spawn all the threads.
-pub fn broker(config: Config) -> () {
+fn broker(config: Config, brk: Arc<AtomicBool>) -> () {
     // create sockets
     let send_socket = Arc::new(UdpSocket::bind(config.sender_bind()).expect("Can't bind sender socket"));
     let recv_socket = Arc::new(UdpSocket::bind(config.receiver_bind()).expect("Can't bind sender socket"));
@@ -24,6 +42,7 @@ pub fn broker(config: Config) -> () {
         config.clone(),
         config.receiver_addr(),
         "BrokerFromSender",
+        brk.clone(),
     );
     // create receiver part
     let from_receiver = handle(
@@ -32,6 +51,7 @@ pub fn broker(config: Config) -> () {
         config.clone(),
         config.sender_addr(),
         "BrokerFromReceiver",
+        brk.clone(),
     );
 
     // wait for them to end
@@ -47,14 +67,17 @@ fn handle(
     config: Config,
     send_addr: SocketAddrV4,
     thread_name: &str,
+    brk: Arc<AtomicBool>,
 ) -> JoinHandle<()> {
     let thread_name_copied = String::from(thread_name);
     thread::Builder::new().name(String::from(thread_name)).spawn(move || {
         let queue = Arc::new(Mutex::new(BinaryHeap::<PacketWrapper>::new()));
         let condvar = Arc::new(Condvar::new());
 
-        let sending = sending_part(&config, &queue, &condvar, &send_socket, send_addr, &thread_name_copied);
-        let receiving = receiving_part(&config, &queue, &condvar, &receive_socket, &thread_name_copied);
+        let sending = sending_part(&config, &queue, &condvar, &send_socket, send_addr,
+                                   &thread_name_copied, brk.clone());
+        let receiving = receiving_part(&config, &queue, &condvar, &receive_socket,
+                                       &thread_name_copied, brk.clone());
 
         sending.join().expect(&format!("Can't join sending part for the {}", thread_name_copied));
         receiving.join().expect(&format!("Can't join receiving part for the {}", thread_name_copied));
@@ -71,6 +94,7 @@ fn receiving_part(
     condvar: &Arc<Condvar>,
     socket: &Arc<UdpSocket>,
     thread_name: &str,
+    brk: Arc<AtomicBool>,
 ) -> JoinHandle<()> {
     let config = config.clone();
     let queue = queue.clone();
@@ -86,11 +110,18 @@ fn receiving_part(
             let probability_dist = Uniform::new(0.0, 1.0);
             let byte_dist = Uniform::new(0, 255);
 
-            loop {
+            while !brk.load(Ordering::SeqCst) {
+                // set socket timeout
+                socket.set_read_timeout(Some(Duration::from_millis(1000)))
+                      .expect("Can't change read timeout of the packet");
                 // receive packet
                 let (size, sender) = match socket.recv_from(buff.as_mut_slice()) {
                     Ok(x) => x,
                     Err(e) => {
+                        let kind = e.kind();
+                        if kind == ErrorKind::WouldBlock || kind == ErrorKind::TimedOut {
+                            continue;
+                        }
                         config.vlog(&format!("Could not receive from socket {:?}, ignoring", socket.local_addr()));
                         config.vlog(&format!("Error: {}", e.to_string()));
                         continue;
@@ -140,23 +171,25 @@ fn sending_part(
     condvar: &Arc<Condvar>,
     socket: &Arc<UdpSocket>,
     send_addr: SocketAddrV4,
-    threadname: &str,
+    thread_name: &str,
+    brk: Arc<AtomicBool>,
 ) -> JoinHandle<()> {
     let config = config.clone();
     let queue = queue.clone();
     let condvar = condvar.clone();
     let socket = socket.clone();
+    let tn = String::from(thread_name);
 
     thread::Builder::new()
-        .name(String::from(format!("{}_{}", threadname, "send")))
+        .name(String::from(format!("{}_send", thread_name)))
         .spawn(move || {
-            loop {
+            while !brk.load(Ordering::SeqCst) {
                 // get packet to send
                 let to_send = {
                     // lock queue to get data
                     let mut queue_guard = queue.lock().expect("Can't lock mutex from the sender part");
                     // loop waiting for the packet to be send
-                    loop {
+                    while !brk.load(Ordering::SeqCst) {
                         // get the wait time based on the first packet that should be send
                         let wait_time = queue_guard.peek().map_or(Duration::from_secs(u64::MAX), |wrapper| { wrapper.send_in() });
                         // if it should be already send break the loop waiting for the packet
@@ -179,7 +212,7 @@ fn sending_part(
                     };
                     // validate once more it should be send already
                     if !packet.should_be_send() {
-                        continue
+                        continue;
                     };
                     // return the packet from the loop
                     packet
@@ -191,7 +224,7 @@ fn sending_part(
                     Err(e) => eprintln!("Error sending data {}", e),
                 };
             };
-        }).expect(&format!("Can't create sender part of the {}", threadname))
+        }).expect(&format!("Can't create sender part of the {}", thread_name))
 }
 
 

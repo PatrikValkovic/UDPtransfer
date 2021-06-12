@@ -58,7 +58,7 @@ fn with_change(){
             drop_rate: 0.0,
             modify_prob: 0.0001
         };
-        broker::logic::broker(bc);
+        broker::logic(bc);
     }).unwrap();
 
     // create sender

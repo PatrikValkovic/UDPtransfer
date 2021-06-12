@@ -2,11 +2,11 @@ use std::fs::{create_dir_all, File, read_dir, remove_dir_all, remove_file};
 use std::io::{Read, Write};
 use std::thread;
 use std::time::Duration;
-
 use itertools::zip;
 use rand::Rng;
-
 use udp_transfer::{broker, receiver, sender};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 #[test]
 fn passthrough(){
@@ -47,21 +47,20 @@ fn passthrough(){
     }).unwrap();
 
     // create broker
-    thread::Builder::new().name(String::from("Broker")).spawn(|| {
-        let bc = broker::config::Config {
-            verbose: false,
-            sender_bindaddr: String::from(BROKER_SEND_PART),
-            sender_addr: String::from(SENDER_ADDR),
-            receiver_bindaddr: String::from(BROKER_RECV_PART),
-            receiver_addr: String::from(RECEIVED_ADDR),
-            packet_size: 1500,
-            delay_mean: 0.0,
-            delay_std: 0.0,
-            drop_rate: 0.0,
-            modify_prob: 0.0
-        };
-        broker::logic::broker(bc);
-    }).unwrap();
+    let broker_brk = Arc::new(AtomicBool::new(false));
+    let bc = broker::config::Config {
+        verbose: false,
+        sender_bindaddr: String::from(BROKER_SEND_PART),
+        sender_addr: String::from(SENDER_ADDR),
+        receiver_bindaddr: String::from(BROKER_RECV_PART),
+        receiver_addr: String::from(RECEIVED_ADDR),
+        packet_size: 1500,
+        delay_mean: 0.0,
+        delay_std: 0.0,
+        drop_rate: 0.0,
+        modify_prob: 0.0
+    };
+    let bt = broker::breakable_logic(bc, broker_brk.clone());
 
     // create sender
     let st = thread::Builder::new().name(String::from("Sender")).spawn(|| {
@@ -81,6 +80,8 @@ fn passthrough(){
 
     // wait for sender and kill receiver afterwards
     st.join().unwrap();
+    broker_brk.store(true, Ordering::SeqCst);
+    bt.join().unwrap();
     thread::sleep(Duration::from_secs(1));
 
     // compare files
