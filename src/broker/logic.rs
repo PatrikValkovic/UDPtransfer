@@ -10,142 +10,188 @@ use rand::{distributions::Uniform, Rng, thread_rng};
 use super::config::Config;
 use super::packet_wrapper::PacketWrapper;
 
+/// Creates the broker and spawn all the threads.
 pub fn broker(config: Config) -> () {
+    // create sockets
     let send_socket = Arc::new(UdpSocket::bind(config.sender_bind()).expect("Can't bind sender socket"));
     let recv_socket = Arc::new(UdpSocket::bind(config.receiver_bind()).expect("Can't bind sender socket"));
     config.vlog(&format!("Sockets created --> {} <--> {} --> {}", config.sender_bind(), config.receiver_bind(), config.receiver_addr()));
 
+    // create sender part
     let from_sender = handle(
         Arc::clone(&send_socket),
         Arc::clone(&recv_socket),
         config.clone(),
         config.receiver_addr(),
-        "BrokerFromSender"
+        "BrokerFromSender",
     );
+    // create receiver part
     let from_receiver = handle(
         Arc::clone(&recv_socket),
         Arc::clone(&send_socket),
         config.clone(),
         config.sender_addr(),
-        "BrokerFromReceiver"
+        "BrokerFromReceiver",
     );
 
-    from_sender.join().expect("Can't join sender part");
-    from_receiver.join().expect("Can't join receiving part");
+    // wait for them to end
+    from_sender.join().expect("Can't join thread from sender");
+    from_receiver.join().expect("Can't join threads from receiver");
 }
 
-
+/// Handles one part of the communication.
+/// It receive packets from socket `send_socket` and resend them to `send_addr` from the `send_socket`.
 fn handle(
     receive_socket: Arc<UdpSocket>,
     send_socket: Arc<UdpSocket>,
     config: Config,
     send_addr: SocketAddrV4,
-    threadname: &str,
+    thread_name: &str,
 ) -> JoinHandle<()> {
-    let name = String::from(threadname);
-    return thread::Builder::new().name(String::from(threadname)).spawn(move || {
+    let thread_name_copied = String::from(thread_name);
+    thread::Builder::new().name(String::from(thread_name)).spawn(move || {
         let queue = Arc::new(Mutex::new(BinaryHeap::<PacketWrapper>::new()));
         let condvar = Arc::new(Condvar::new());
 
-        sending_part(&config, &queue, &condvar, &send_socket, send_addr, &name);
-        receiving_part(&config, &queue, &condvar, &receive_socket);
-    }).expect(&format!("Can't create {} thread", threadname));
+        let sending = sending_part(&config, &queue, &condvar, &send_socket, send_addr, &thread_name_copied);
+        let receiving = receiving_part(&config, &queue, &condvar, &receive_socket, &thread_name_copied);
+
+        sending.join().expect(&format!("Can't join sending part for the {}", thread_name_copied));
+        receiving.join().expect(&format!("Can't join receiving part for the {}", thread_name_copied));
+    }).expect(&format!("Can't create thread for {}", thread_name))
 }
 
+/// Handles receiving part of the communication.
+/// It receives packets from `socket` and add them to the `queue`.
+/// After adding content to the `queue` it notifies other thread (one) using `condvar` variable.
+/// It decides about the delay, modification, and whether the packet should be dropped.
 fn receiving_part(
     config: &Config,
     queue: &Arc<Mutex<BinaryHeap<PacketWrapper>>>,
     condvar: &Arc<Condvar>,
     socket: &Arc<UdpSocket>,
-) {
-    let mut buff = vec![0; 65535];
-    let mut rand_gen = thread_rng();
-    let unif = Uniform::new(0.0, 1.0);
-    let byte_dist = Uniform::new(0,255);
+    thread_name: &str,
+) -> JoinHandle<()> {
+    let config = config.clone();
+    let queue = queue.clone();
+    let condvar = condvar.clone();
+    let socket = socket.clone();
 
-    loop {
-        let (size, sender) = match socket.recv_from(buff.as_mut_slice()) {
-            Ok(x) => x,
-            Err(e) => {
-                println!("Could not receive from socket {:?}, ignoring", socket.local_addr());
-                println!("{:?}", e);
-                continue;
-            }
-        };
-        config.vlog(&format!("Received {}b of data from {}.", size, sender));
+    thread::Builder::new()
+        .name(format!("{}_receive", thread_name))
+        .spawn(move || {
+            // create variables
+            let mut buff = vec![0; 65535];
+            let mut rand_gen = thread_rng();
+            let probability_dist = Uniform::new(0.0, 1.0);
+            let byte_dist = Uniform::new(0, 255);
 
-        if rand_gen.sample(unif) > config.droprate() {
-            let delay: f32 = f32::max(0.0, config.delay_std() * rand_gen.gen::<f32>() + config.delay_mean());
-            let content_length = min(size, config.max_packet_size() as usize);
-            for i in 0..content_length {
-                if rand_gen.sample(unif) < config.modify_prob() {
-                    buff[i] = rand_gen.sample(byte_dist);
+            loop {
+                // receive packet
+                let (size, sender) = match socket.recv_from(buff.as_mut_slice()) {
+                    Ok(x) => x,
+                    Err(e) => {
+                        config.vlog(&format!("Could not receive from socket {:?}, ignoring", socket.local_addr()));
+                        config.vlog(&format!("Error: {}", e.to_string()));
+                        continue;
+                    }
+                };
+                config.vlog(&format!("Received {}b of data from {}.", size, sender));
+
+                // drop packet if dropout
+                if rand_gen.sample(probability_dist) < config.droprate() {
+                    config.vlog("Packet drop");
+                    continue;
                 }
+
+                // modify packet and shorten it if necessary
+                let content_length = min(size, config.max_packet_size() as usize);
+                if config.modify_prob() > 0.0 {
+                    for i in 0..content_length {
+                        if rand_gen.sample(probability_dist) < config.modify_prob() {
+                            buff[i] = rand_gen.sample(byte_dist);
+                        }
+                    }
+                }
+                let content = Vec::from(&buff[..content_length]);
+
+                // get delay and create wrapper
+                let delay: f32 = f32::max(0.0, config.delay_std() * rand_gen.gen::<f32>() + config.delay_mean());
+                let wrapper = PacketWrapper::new(content, delay as u32);
+
+                // add packet to the queue
+                {
+                    let mut queue = queue.lock().expect("Can't lock mutex from receiving part");
+                    queue.push(wrapper);
+                    condvar.notify_one();
+                }
+                config.vlog(&format!("Packet add to the queue"));
             }
-            let content = Vec::from(&buff[..content_length]);
-
-
-            let wrapper = PacketWrapper::new(content, delay as u32);
-
-            {
-                let mut queue = queue.lock().expect("Can't lock mutex from receiving part");
-                queue.push(wrapper);
-                condvar.notify_one();
-            }
-            config.vlog(&format!("Packet add to the queue"));
-        } else {
-            config.vlog(&format!("Drop packet"));
-        }
-    }
+        }).expect(&format!("Can't create receiving part of the {}", thread_name))
 }
 
+/// Handles sending part of the communication.
+/// It pulls packets from the `queue` (after the required amount of time passed) and
+/// send them to `sendaddr` using `socket`.
+/// When new packet arrive into the `queue` it should be signaled using `condvar`.
 fn sending_part(
     config: &Config,
     queue: &Arc<Mutex<BinaryHeap<PacketWrapper>>>,
     condvar: &Arc<Condvar>,
     socket: &Arc<UdpSocket>,
-    sendaddr: SocketAddrV4,
-    threadname: &str
+    send_addr: SocketAddrV4,
+    threadname: &str,
 ) -> JoinHandle<()> {
     let config = config.clone();
-    let queue = Arc::clone(queue);
-    let condvar = Arc::clone(condvar);
-    let socket = Arc::clone(socket);
+    let queue = queue.clone();
+    let condvar = condvar.clone();
+    let socket = socket.clone();
 
-    thread::Builder::new().name(String::from(format!("{}_{}", threadname, "send")))
+    thread::Builder::new()
+        .name(String::from(format!("{}_{}", threadname, "send")))
         .spawn(move || {
-        loop {
-            let to_send;
-            {
-                let packet = {
+            loop {
+                // get packet to send
+                let to_send = {
+                    // lock queue to get data
                     let mut queue_guard = queue.lock().expect("Can't lock mutex from the sender part");
+                    // loop waiting for the packet to be send
                     loop {
-                        let wait_time = queue_guard.peek().map_or(Duration::from_millis(u64::MAX), |wrapper| { wrapper.send_in() });
+                        // get the wait time based on the first packet that should be send
+                        let wait_time = queue_guard.peek().map_or(Duration::from_secs(u64::MAX), |wrapper| { wrapper.send_in() });
+                        // if it should be already send break the loop waiting for the packet
                         if wait_time.as_millis() == 0 {
                             break;
                         }
+                        // wait time cannot be longer than 1s because of the termination
+                        let wait_time = Duration::min(wait_time, Duration::from_secs(1));
+                        // else wait specified time or until new packet (possibly with earlier sending time) is inserted
                         let result = condvar.wait_timeout(
                             queue_guard,
                             wait_time,
                         ).expect("Can't lock mutex from the sender part");
                         queue_guard = result.0;
                     };
-                    queue_guard.pop()
+                    // packet in the queue, pop it
+                    let packet = match queue_guard.pop() {
+                        Some(x) => x,
+                        None => continue,
+                    };
+                    // validate once more it should be send already
+                    if !packet.should_be_send() {
+                        continue
+                    };
+                    // return the packet from the loop
+                    packet
                 };
-                to_send = match packet {
-                    Some(x) => x,
-                    None => {
-                        config.vlog(&format!("No item in queue"));
-                        continue;
-                    }
-                };
-            };
 
-            match socket.send_to(to_send.content(), sendaddr) {
-                Ok(send_size) => config.vlog(&format!("Send data of size {}b to {}", send_size, sendaddr)),
-                Err(e) => eprintln!("Error sending data {}", e),
+                // send packet
+                match socket.send_to(to_send.content(), send_addr) {
+                    Ok(send_size) => config.vlog(&format!("Send data of size {}b to {}", send_size, send_addr)),
+                    Err(e) => eprintln!("Error sending data {}", e),
+                };
             };
-        };
-    }).expect(&format!("Can't create sender part for {}", threadname))
+        }).expect(&format!("Can't create sender part of the {}", threadname))
 }
+
 

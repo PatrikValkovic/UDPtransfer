@@ -2,6 +2,7 @@ use std::time::{Instant, Duration};
 use std::ops::Add;
 use std::cmp::{Ord, Ordering};
 
+/// Structure that stores data temporally before they are send.
 pub struct PacketWrapper {
     content: Vec<u8>,
     send_at: Instant,
@@ -17,11 +18,17 @@ impl PacketWrapper {
     }
 
     pub fn send_in(&self) -> Duration {
-        return self.send_at.checked_duration_since(Instant::now()).unwrap_or_else(||{Duration::from_secs(0)});
+        self.send_at
+            .checked_duration_since(Instant::now())
+            .unwrap_or_else(|| { Duration::from_secs(0) })
+    }
+
+    pub fn should_be_send(&self) -> bool {
+        self.send_at < Instant::now()
     }
 
     pub fn content(&self) -> &Vec<u8> {
-        return &self.content;
+        &self.content
     }
 }
 
