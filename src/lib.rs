@@ -10,7 +10,6 @@ mod connection_properties;
 mod socket_manipulation;
 pub use socket_manipulation::recv_with_timeout;
 
-
 pub mod broker;
 pub mod sender;
 pub mod receiver;

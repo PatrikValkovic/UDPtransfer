@@ -5,6 +5,8 @@ use rand::{Rng};
 use std::io::{Write, Read};
 use std::time::Duration;
 use itertools::zip;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 #[test]
 fn direct_send(){
@@ -43,20 +45,19 @@ fn direct_send(){
     }).unwrap();
 
     // create sender
-    let st = thread::Builder::new().name(String::from("Sender")).spawn(|| {
-        let sc = sender::config::Config {
-            verbose: false,
-            bind_addr: String::from(SENDER_ADDR),
-            file: String::from(SOURCE_FILE),
-            packet_size: 1500,
-            send_addr: String::from(RECEIVED_ADDR),
-            window_size: 15,
-            timeout: 100,
-            repetition: 10,
-            sum_size: 0
-        };
-        sender::logic::logic(sc).unwrap();
-    }).unwrap();
+    let sender_brk = Arc::new(AtomicBool::new(false));
+    let sc = sender::config::Config {
+        verbose: false,
+        bind_addr: String::from(SENDER_ADDR),
+        file: String::from(SOURCE_FILE),
+        packet_size: 1500,
+        send_addr: String::from(BROKER_SEND_PART),
+        window_size: 15,
+        timeout: 100,
+        repetition: 10,
+        sum_size: 0
+    };
+    let st= sender::breakable_logic(sc, sender_brk);
 
     // wait for sender and kill receiver afterwards
     st.join().unwrap();

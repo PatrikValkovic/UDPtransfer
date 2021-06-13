@@ -5,6 +5,8 @@ use rand::{Rng};
 use std::io::{Write, Read};
 use std::time::Duration;
 use itertools::zip;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 #[test]
 fn with_change(){
@@ -45,40 +47,40 @@ fn with_change(){
     }).unwrap();
 
     // create broker
-    thread::Builder::new().name(String::from("Broker")).spawn(|| {
-        let bc = broker::config::Config {
-            verbose: false,
-            sender_bindaddr: String::from(BROKER_SEND_PART),
-            sender_addr: String::from(SENDER_ADDR),
-            receiver_bindaddr: String::from(BROKER_RECV_PART),
-            receiver_addr: String::from(RECEIVED_ADDR),
-            packet_size: 1000,
-            delay_mean: 0.0,
-            delay_std: 0.0,
-            drop_rate: 0.0,
-            modify_prob: 0.0001
-        };
-        broker::logic(bc);
-    }).unwrap();
+    let broker_brk = Arc::new(AtomicBool::new(false));
+    let bc = broker::config::Config {
+        verbose: false,
+        sender_bindaddr: String::from(BROKER_SEND_PART),
+        sender_addr: String::from(SENDER_ADDR),
+        receiver_bindaddr: String::from(BROKER_RECV_PART),
+        receiver_addr: String::from(RECEIVED_ADDR),
+        packet_size: 1000,
+        delay_mean: 0.0,
+        delay_std: 0.0,
+        drop_rate: 0.0,
+        modify_prob: 0.0001
+    };
+    let bt = broker::breakable_logic(bc, broker_brk.clone());
 
     // create sender
-    let st = thread::Builder::new().name(String::from("Sender")).spawn(|| {
-        let sc = sender::config::Config {
-            verbose: false,
-            bind_addr: String::from(SENDER_ADDR),
-            file: String::from(SOURCE_FILE),
-            packet_size: 1500,
-            send_addr: String::from(BROKER_SEND_PART),
-            window_size: 15,
-            timeout: 100,
-            repetition: 10,
-            sum_size: 64
-        };
-        sender::logic::logic(sc).unwrap();
-    }).unwrap();
+    let sender_brk = Arc::new(AtomicBool::new(false));
+    let sc = sender::config::Config {
+        verbose: false,
+        bind_addr: String::from(SENDER_ADDR),
+        file: String::from(SOURCE_FILE),
+        packet_size: 1500,
+        send_addr: String::from(BROKER_SEND_PART),
+        window_size: 15,
+        timeout: 100,
+        repetition: 10,
+        sum_size: 0
+    };
+    let st= sender::breakable_logic(sc, sender_brk);
 
     // wait for sender and kill receiver afterwards
     st.join().unwrap();
+    broker_brk.store(true, Ordering::SeqCst);
+    bt.join().unwrap();
     thread::sleep(Duration::from_secs(1));
 
     // compare files

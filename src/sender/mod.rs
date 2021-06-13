@@ -1,3 +1,5 @@
 pub mod config;
-pub mod logic;
-pub mod sender_connection_properties;
+mod logic;
+mod sender_connection_properties;
+
+pub use logic::{logic, breakable_logic};

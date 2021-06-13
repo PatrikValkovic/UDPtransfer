@@ -63,20 +63,19 @@ fn passthrough(){
     let bt = broker::breakable_logic(bc, broker_brk.clone());
 
     // create sender
-    let st = thread::Builder::new().name(String::from("Sender")).spawn(|| {
-        let sc = sender::config::Config {
-            verbose: false,
-            bind_addr: String::from(SENDER_ADDR),
-            file: String::from(SOURCE_FILE),
-            packet_size: 1500,
-            send_addr: String::from(BROKER_SEND_PART),
-            window_size: 15,
-            timeout: 100,
-            repetition: 10,
-            sum_size: 0
-        };
-        sender::logic::logic(sc).unwrap();
-    }).unwrap();
+    let sender_brk = Arc::new(AtomicBool::new(false));
+    let sc = sender::config::Config {
+        verbose: false,
+        bind_addr: String::from(SENDER_ADDR),
+        file: String::from(SOURCE_FILE),
+        packet_size: 1500,
+        send_addr: String::from(BROKER_SEND_PART),
+        window_size: 15,
+        timeout: 100,
+        repetition: 10,
+        sum_size: 0
+    };
+    let st= sender::breakable_logic(sc, sender_brk);
 
     // wait for sender and kill receiver afterwards
     st.join().unwrap();

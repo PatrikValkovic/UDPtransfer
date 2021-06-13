@@ -6,6 +6,8 @@ use std::io::{Write, Read};
 use std::time::Duration;
 use itertools::zip;
 use std::thread::{JoinHandle};
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 #[test]
 fn more_senders(){
@@ -49,20 +51,19 @@ fn more_senders(){
 
     // create senders
     let senders_threads = SENDER_ADDR.iter().map(|addr|{
-        thread::Builder::new().name(format!("SENDER_{}", addr)).spawn(move || {
-            let sc = sender::config::Config {
-                verbose: false,
-                bind_addr: String::from(*addr),
-                file: String::from(SOURCE_FILE),
-                packet_size: 1500,
-                send_addr: String::from(RECEIVED_ADDR),
-                window_size: 15,
-                timeout: 5000,
-                repetition: 10,
-                sum_size: 0
-            };
-            sender::logic::logic(sc).unwrap();
-        }).unwrap()
+        let sender_brk = Arc::new(AtomicBool::new(false));
+        let sc = sender::config::Config {
+            verbose: false,
+            bind_addr: String::from(*addr),
+            file: String::from(SOURCE_FILE),
+            packet_size: 1500,
+            send_addr: String::from(BROKER_SEND_PART),
+            window_size: 15,
+            timeout: 100,
+            repetition: 10,
+            sum_size: 0
+        };
+        sender::breakable_logic(sc, sender_brk)
     }).collect::<Vec<JoinHandle<()>>>();
 
     // wait for sender and kill receiver afterwards
