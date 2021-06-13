@@ -33,12 +33,12 @@ pub fn logic(config: Config) -> Result<(), String> {
 
 pub fn sender(config: Config, brk: Arc<AtomicBool>) -> Result<(), String> {
     // open file
-    let mut input_file = File::open(config.filename()).expect("Couldn't open file");
-    config.vlog(&format!("File {} opened", config.filename()));
+    let mut input_file = File::open(&config.file).expect("Couldn't open file");
+    config.vlog(&format!("File {} opened", &config.file));
     // connect socket
     let socket = UdpSocket::bind(config.bind_addr()).expect("Can't bind socket");
     config.vlog(&format!("Socket bind to {}", config.bind_addr()));
-    socket.set_read_timeout(Option::Some(Duration::from_millis(config.timeout() as u64))).expect("Can't set timeout on the socket");
+    socket.set_read_timeout(Option::Some(Duration::from_millis(config.timeout as u64))).expect("Can't set timeout on the socket");
 
     // init connection
     let mut props =
@@ -63,14 +63,14 @@ fn create_connection(
     let mut buffer = vec![0; BUFFER_SIZE];
     // create my init packet
     let mut init_packet = InitPacket::new(
-        config.window_size(),
-        config.max_packet_size(),
-        config.checksum_size(),
+        config.window_size,
+        config.packet_size,
+        config.checksum_size,
     );
 
     // for specified number of retries
     let mut attempts = 0;
-    while attempts < config.repetitions() && !brk.load(Ordering::SeqCst) {
+    while attempts < config.repetition && !brk.load(Ordering::SeqCst) {
         // send packet
         config.vlog(&format!("Attempt {} to establish connection", attempts + 1));
         let packet = Packet::from(Clone::clone(&init_packet));
@@ -144,7 +144,7 @@ fn create_connection(
         };
     }
     // didn't receive init packet after specified number of retries
-    println!("Can't establish connection with the server after {} attempts", config.repetitions());
+    println!("Can't establish connection with the server after {} attempts", config.repetition);
     return Err(());
 }
 
@@ -162,7 +162,7 @@ fn send_data(
     let mut attempts = 0;
     let mut buffer = vec![0; BUFFER_SIZE];
     // process data
-    while attempts < config.repetitions() && !props.is_complete() && !brk.load(Ordering::SeqCst) {
+    while attempts < config.repetition && !props.is_complete() && !brk.load(Ordering::SeqCst) {
         // load data to fill rest of the window
         props.load_window(&mut input_file, &config);
         // send data
@@ -253,7 +253,7 @@ fn send_end(
     ));
     // wait for end packet
     let mut attempts = 0;
-    while attempts < config.repetitions() && !brk.load(Ordering::SeqCst) {
+    while attempts < config.repetition && !brk.load(Ordering::SeqCst) {
         // send end packet
         let size = packet.to_bin_buff(&mut buffer, props.static_properties.checksum_size as usize);
         socket.send_to(&buffer[..size], props.static_properties.socket_addr).expect("Can't send end packet");

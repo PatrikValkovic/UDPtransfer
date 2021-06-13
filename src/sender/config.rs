@@ -1,8 +1,6 @@
 use std::net::{SocketAddrV4, SocketAddr};
 use std::str::FromStr;
 use argparse::{ArgumentParser, StoreTrue, Store};
-use time::OffsetDateTime;
-use crate::DATE_FORMAT_STR;
 use crate::loggable::Loggable;
 
 pub struct Config {
@@ -14,7 +12,7 @@ pub struct Config {
     pub window_size: u16,
     pub timeout: u32,
     pub repetition: u16,
-    pub sum_size: u16,
+    pub checksum_size: u16,
 }
 
 impl Config {
@@ -28,42 +26,22 @@ impl Config {
             window_size: 15,
             timeout: 100,
             repetition: 20,
-            sum_size: 64,
+            checksum_size: 64,
         };
     }
 
     pub fn bind_addr(&self) -> SocketAddrV4 {
         return SocketAddrV4::from_str(self.bind_addr.as_str()).expect("Bind address is invalid");
     }
-
     pub fn send_addr(&self) -> SocketAddr {
         return SocketAddr::from_str(self.send_addr.as_str()).expect("Send address is invalid");
     }
 
-    pub fn filename(&self) -> &str {
-        return &self.file;
-    }
-    pub fn max_packet_size(&self) -> u16 {
-        return self.packet_size;
-    }
-    pub fn is_verbose(&self) -> bool {
-        return self.verbose;
-    }
-    pub fn timeout(&self) -> u32 {
-        return self.timeout;
-    }
-    pub fn window_size(&self) -> u16 {
-        return self.window_size;
-    }
-    pub fn repetitions(&self) -> u16 {
-        return self.repetition;
-    }
-    pub fn checksum_size(&self) -> u16 {
-        return self.sum_size;
-    }
-
     pub fn vlog(&self, text: &str) {
         Loggable::vlog(self, &text)
+    }
+    pub fn is_verbose(&self) -> bool {
+        Loggable::is_verbose(self)
     }
 
     pub fn from_command_line() -> Self {
@@ -87,7 +65,7 @@ impl Config {
                 .add_option(&["-t", "--timeout"], Store, "Timeout after starts to resend the data");
             parser.refer(&mut config.repetition)
                 .add_option(&["-r", "--repetition"], Store, "How many times to resend packet");
-            parser.refer(&mut config.sum_size)
+            parser.refer(&mut config.checksum_size)
                 .add_option(&["-s", "--sum_size"], Store, "Size of the checksum");
             parser.parse_args_or_exit();
         }
@@ -96,9 +74,7 @@ impl Config {
 }
 
 impl Loggable for Config {
-    fn vlog(&self, text: &str) {
-        if self.verbose {
-            println!("{}: {}", OffsetDateTime::now_utc().format(DATE_FORMAT_STR), text);
-        }
+    fn is_verbose(&self) -> bool {
+        self.verbose
     }
 }

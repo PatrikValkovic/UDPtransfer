@@ -60,7 +60,7 @@ fn more_senders(){
             window_size: 15,
             timeout: 100,
             repetition: 10,
-            sum_size: 0
+            checksum_size: 0
         };
         sender::breakable_logic(sc, sender_brk)
     }).collect::<Vec<_>>();

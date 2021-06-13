@@ -123,16 +123,16 @@ fn receiving_part(
                 config.vlog(&format!("Received {}b of data from {}.", size, sender));
 
                 // drop packet if dropout
-                if rand_gen.sample(probability_dist) < config.droprate() {
+                if rand_gen.sample(probability_dist) < config.drop_rate {
                     config.vlog("Packet drop");
                     continue;
                 }
 
                 // modify packet and shorten it if necessary
-                let content_length = min(size, config.max_packet_size() as usize);
-                if config.modify_prob() > 0.0 {
+                let content_length = min(size, config.packet_size as usize);
+                if config.modify_prob > 0.0 {
                     for i in 0..content_length {
-                        if rand_gen.sample(probability_dist) < config.modify_prob() {
+                        if rand_gen.sample(probability_dist) < config.modify_prob {
                             buff[i] = rand_gen.sample(byte_dist);
                         }
                     }
@@ -140,7 +140,7 @@ fn receiving_part(
                 let content = Vec::from(&buff[..content_length]);
 
                 // get delay and create wrapper
-                let delay: f32 = f32::max(0.0, config.delay_std() * rand_gen.gen::<f32>() + config.delay_mean());
+                let delay: f32 = f32::max(0.0, config.delay_std * rand_gen.gen::<f32>() + config.delay_mean);
                 let wrapper = PacketWrapper::new(content, delay as u32);
 
                 // add packet to the queue

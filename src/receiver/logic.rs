@@ -1,6 +1,5 @@
 use std::net::{UdpSocket};
 use std::result::Result::Ok;
-use std::io::ErrorKind;
 use std::cmp::{max, min};
 use std::collections::{HashMap as PropertiesMap};
 use rand::Rng;
@@ -12,23 +11,24 @@ use crate::connection_properties::ConnectionProperties;
 use crate::receiver::receiver_connection_properties::ReceiverConnectionProperties;
 use std::time::Duration;
 use std::path::Path;
-use crate::BUFFER_SIZE;
+use crate::{BUFFER_SIZE, recv_with_timeout};
 
 pub fn logic(config: Config) -> Result<(), String> {
+    // create socket
     let socket = UdpSocket::bind(config.binding()).expect("Can't bind socket");
-    socket.set_read_timeout(Some(Duration::from_millis(config.get_timeout() as u64))).expect("Can't set read timeout");
+    socket.set_read_timeout(Some(Duration::from_millis(config.timeout as u64))).expect("Can't set read timeout");
     config.vlog(&format!("Socket bind to {}", config.binding()));
 
     // create structures
     let mut random_generator = rand::thread_rng();
     let mut properties = PropertiesMap::<u32, ReceiverConnectionProperties>::new();
-
     let mut buffer = vec![0; BUFFER_SIZE];
+
     loop {
-        // filter timeouted connections
+        // filter connections timeout
         // TODO use heap
         let ids_to_disconnect = properties.iter()
-            .filter(|(_,prop)| prop.timeouted(config.get_timeout()))
+            .filter(|(_,prop)| prop.timeouted(config.timeout))
             .map(|(key,_)| *key)
             .collect_vec();
         for conn_id in ids_to_disconnect {
@@ -36,257 +36,214 @@ pub fn logic(config: Config) -> Result<(), String> {
             remove_connection(&prop, &config, &mut buffer, &socket, "timeout");
         }
         // receive from socket
-        let result = socket.recv_from(&mut buffer);
-        if let Err(e) = result {
-            let kind = e.kind();
-            if kind == ErrorKind::WouldBlock || kind == ErrorKind::TimedOut {
-                continue;
-            }
-            config.vlog(&format!("Error receiving packet, {}", e.to_string()));
+        let result = recv_with_timeout(&socket, &mut buffer, Box::new(&config));
+        if let Err(_) = result {
             continue;
+        }
+        let (packet_size, received_from) = match result {
+            Err(_) => continue,
+            Ok(x) => x,
         };
         // get content
-        let (packet_size, received_from) = result.unwrap();
-        if packet_size < PacketHeader::bin_size() {
-            config.vlog(&format!("Invalid packet with size {}", packet_size));
-            continue;
-        }
         config.vlog(&format!("Received packet of size {}", packet_size));
         let packet_content = &buffer[..packet_size];
-        // parse header
-        let header_result = PacketHeader::from_bin(&buffer[..PacketHeader::bin_size()]);
-        if let Err(e) = header_result {
-            if config.is_verbose() {
-                let header_in_bin = &buffer[..PacketHeader::bin_size()];
-                let header_in_str = Itertools::intersperse(
-                    header_in_bin.iter().map(|num| { format!("{:02x}", num) }),
-                    String::from("")
-                );
-                let header_in_str: String = header_in_str.collect();
-                println!("Invalid header: {}; error: {:?}", header_in_str, e);
-            }
-            continue;
-        }
-        let header = header_result.unwrap();
-        config.vlog(&format!("It is packet with flag {:?}", header.flag));
-        // process based on flag
-        match header.flag {
 
-            // None flag ignore
-            Flag::None => {
-                config.vlog("Flag is not specified");
+        // parse header
+        let header_result = PacketHeader::from_bin(packet_content);
+        let header = match header_result {
+            Err(e) => {
+                if config.is_verbose() {
+                    let header_in_bin = &buffer[..min(PacketHeader::bin_size(), packet_size)];
+                    let header_in_str = Itertools::intersperse(
+                        header_in_bin.iter().map(|num| { format!("{:02x}", num) }),
+                        String::from("")
+                    );
+                    let header_in_str: String = header_in_str.collect();
+                    config.vlog(&format!("Invalid header: {}; error: {:?}", header_in_str, e));
+                }
                 continue;
             }
+            Ok(h) => h,
+        };
+        config.vlog(&format!("It is packet with flag {:?}", header.flag));
 
-            // Init flag
-            Flag::Init => {
-                // Get content of init packet
-                let init_content_result = InitPacket::from_bin_no_size_and_hash_check(&buffer[..packet_size]);
-                if let Err(ref e) = init_content_result {
+        // process init packet
+        if let Flag::Init = header.flag {
+            // Get content of init packet without checksum check, so it cat be used later
+            // (and mainly infer what the checksum size should be)
+            let init_content_result = InitPacket::from_bin_no_size_and_hash_check(&buffer[..packet_size]);
+            let init_content = match init_content_result {
+                Err(e) => {
                     config.vlog(&format!("Can't get content of init packet {:?}", e));
                     continue;
                 }
-                let init_content = init_content_result.unwrap();
-                config.vlog(&format!(
-                    "Init packet properties, window size: {}, packet_size: {}, checksum: {}",
-                    init_content.window_size,
-                    init_content.packet_size,
-                    init_content.checksum_size
-                ));
-                // parse as packet
-                let packet = Packet::from_bin(packet_content, init_content.checksum_size as usize);
-                match packet {
-                    // everything OK, answer
-                    Ok(Packet::Init(_)) => {
-                        // define properties
-                        let window_size = min(init_content.window_size, config.max_window_size());
-                        let packet_size = min(init_content.packet_size, config.max_packet_size());
-                        let checksum_size = max(init_content.checksum_size, config.min_checksum_size());
-                        let id: u32 = loop {
-                            let id = random_generator.gen();
-                            if !properties.contains_key(&id) && id > 0 {
-                                break id;
-                            }
-                        };
-                        // create properties
-                        let props = ReceiverConnectionProperties::new(
-                            ConnectionProperties::new(id, checksum_size, window_size, packet_size, received_from)
-                        );
-                        config.vlog(&format!(
-                            "New connection {} with window_size: {}, packet_size: {}, checksum_size: {} created",
-                            props.static_properties.id,
-                            props.static_properties.window_size,
-                            props.static_properties.packet_size,
-                            props.static_properties.checksum_size,
-                        ));
-                        // store them
-                        if let Some(_) = properties.insert(id, props) {
-                            panic!("Connection with this ID already exists");
+                Ok(r) => r,
+            };
+            config.vlog(&format!(
+                "Init packet properties, window size: {}, packet_size: {}, checksum: {}",
+                init_content.window_size,
+                init_content.packet_size,
+                init_content.checksum_size
+            ));
+            // parse as packet
+            let packet = Packet::from_bin(packet_content, init_content.checksum_size as usize);
+            match packet {
+                // everything OK, answer
+                Ok(Packet::Init(_)) => {
+                    // define properties
+                    let window_size = min(init_content.window_size, config.max_window_size);
+                    let packet_size = min(init_content.packet_size, config.max_packet_size);
+                    let checksum_size = max(init_content.checksum_size, config.min_checksum);
+                    let id: u32 = loop {
+                        let id = random_generator.gen();
+                        if !properties.contains_key(&id) && id > 0 {
+                            break id;
                         }
-                        // answer the sender
-                        let mut answer_packet = InitPacket::new(window_size, packet_size, checksum_size);
-                        answer_packet.header.id = id;
-                        let answer_length = Packet::from(answer_packet).to_bin_buff(&mut buffer, checksum_size as usize);
-                        socket.send_to(&buffer[..answer_length], received_from).expect("Can't answer with init packet");
-                        config.vlog("Answer init packet send");
-                    },
-                    // Not parsed init packet
-                    Ok(_) => {
-                        config.vlog("Expected init packet, but parsed something different");
+                    };
+                    // create connection properties
+                    let props = ReceiverConnectionProperties::new(
+                        ConnectionProperties::new(id, checksum_size, window_size, packet_size, received_from)
+                    );
+                    config.vlog(&format!(
+                        "New connection {} with window_size: {}, packet_size: {}, checksum_size: {} created",
+                        props.static_properties.id,
+                        props.static_properties.window_size,
+                        props.static_properties.packet_size,
+                        props.static_properties.checksum_size,
+                    ));
+                    // store them
+                    if let Some(_) = properties.insert(id, props) {
+                        panic!("Connection with this ID already exists");
                     }
-                    // Checksum not match, can't infer content
-                    Err(ParsingError::ChecksumNotMatch) => {
-                        config.vlog("Checksum of init packet not match, ignoring");
-                    }
-                    // Received smaller packet, therefore checksum (and validity of data) can't be checked
-                    // Answer with receiver setting and let sender ask once again
-                    Err(ParsingError::InvalidSize(expect, actual)) => {
-                        config.vlog(&format!("Expected init packet of size {}, but received {}", expect, actual));
-                        let return_init = InitPacket::new(
-                            config.max_window_size(),
-                            min(config.max_packet_size(), packet_size as u16),
-                            config.min_checksum_size()
-                        );
-                        config.vlog(&format!(
-                            "Return init packet with properties, window size: {}, packet_size: {}, checksum: {}",
-                            return_init.window_size,
-                            return_init.packet_size,
-                            return_init.checksum_size
-                        ));
-                        let answer_packet_size = Packet::from(return_init).to_bin_buff(buffer.as_mut_slice(), config.min_checksum_size() as usize);
-                        socket.send_to(&buffer[..answer_packet_size], received_from).expect("Can't answer with init packet after invalid size");
-                        config.vlog("Return init packet send back");
-                    }
-                    // Other error
-                    Err(e) => {
-                        config.vlog(&format!("Error parsing init packet {:?}", e));
-                    }
-                };
-            }
-
-            Flag::Data => {
-                // get connection properties
-                let conn_id = header.id;
-                let prop = properties.get(&conn_id);
-                if let None = prop {
-                    config.vlog(&format!("Received data packet for connection {}, but it doesn't exists", conn_id));
-                    continue;
+                    // answer the sender
+                    let mut answer_packet = InitPacket::new(window_size, packet_size, checksum_size);
+                    answer_packet.header.id = id;
+                    let answer_length = Packet::from(answer_packet).to_bin_buff(&mut buffer, checksum_size as usize);
+                    socket.send_to(&buffer[..answer_length], received_from).expect("Can't answer with init packet");
+                    config.vlog("Answer init packet send");
+                },
+                // Not parsed init packet
+                Ok(_) => {
+                    config.vlog("Expected init packet, but parsed something different");
                 }
-                let prop = prop.unwrap();
-                // parse packet
-                let packet = Packet::from_bin(&packet_content, prop.static_properties.checksum_size as usize);
-                match packet {
-                    Ok(Packet::Data(packet)) => {
-                        config.vlog(&format!(
-                            "Data packet for {} with seq {} and {}b of data, window at {} with size {}",
-                            prop.static_properties.id,
-                            packet.header.seq,
-                            packet.data.len(),
-                            prop.window_position,
-                            prop.static_properties.window_size
-                        ));
-                        let prop = properties.get_mut(&conn_id).unwrap();
-                        // make sure it is within window
-                        if !prop.is_within_window(packet.header.seq, &config) {
-                            config.vlog("Data packed is not within window");
-                        }
-                        else {
-                            // store it into structure
-                            prop.store_data(&packet.data, packet.header.seq, &config);
-                            // save it into file
-                            prop.save_into_file(&config);
-                        }
-                        // return response
-                        let ack = prop.get_acknowledge();
-                        let packet = DataPacket::new_receiver(
-                            prop.static_properties.id,
-                            packet.header.seq,
-                            ack
-                        );
-                        config.vlog(&format!("Answer with ack {}", packet.header.ack));
-                        let packet = Packet::from(packet);
-                        let response_size = packet.to_bin_buff(&mut buffer, prop.static_properties.checksum_size as usize);
-                        socket.send_to(&buffer[..response_size], received_from).expect("Can't respond to data packet");
-                        config.vlog("Answer data packet send");
-                    },
-                    Ok(_) => {
-                        config.vlog("Expected data packet but something different parsed");
-                        continue;
-                    }
-                    Err(e) => {
-                        config.vlog(&format!("Error parsing data packet {:?}", e));
-                        continue;
-                    }
-                };
-            }
-
-            // Error flag
-            Flag::Error => {
-                // get connection properties
-                let conn_id = header.id;
-                let prop = properties.get(&conn_id);
-                if let None = prop {
-                    config.vlog(&format!("Received error packet for connection {}, but it doesn't exists", conn_id));
-                    continue;
+                // Checksum not match, can't infer content
+                Err(ParsingError::ChecksumNotMatch) => {
+                    config.vlog("Checksum of init packet not match, ignoring");
                 }
-                let prop = prop.unwrap();
-                // get packet
-                let packet = Packet::from_bin(&packet_content, prop.static_properties.checksum_size as usize);
-                match packet {
-                    Ok(Packet::Error(_)) => {
-                        let prop = properties.remove(&conn_id).expect("Can't remove connection property");
-                        remove_connection(&prop, &config, &mut buffer, &socket, "error packet");
-                        println!("Error received in connection {}", prop.static_properties.id);
-                    },
-                    Ok(_) => {
-                        config.vlog("Expected error packet but something different parsed");
-                        continue;
-                    }
-                    Err(e) => {
-                        config.vlog(&format!("Error parsing error packet {:?}", e));
-                        continue;
-                    }
-                };
-            }
-
-            Flag::End => {
-                // get connection properties
-                let conn_id = header.id;
-                let prop = properties.get_mut(&conn_id);
-                if let None = prop {
-                    config.vlog(&format!("Received end packet for connection {}, but it doesn't exists", conn_id));
-                    continue;
+                // Received smaller packet, therefore checksum (and validity of data) can't be checked
+                // Answer with receiver setting (and size that arrived) and let sender ask again
+                Err(ParsingError::InvalidSize(expect, actual)) => {
+                    config.vlog(&format!("Expected init packet of size {}, but received {}", expect, actual));
+                    let return_init = InitPacket::new(
+                        config.max_window_size,
+                        min(config.max_packet_size, packet_size as u16),
+                        config.min_checksum
+                    );
+                    config.vlog(&format!(
+                        "Return init packet with properties, window size: {}, packet_size: {}, checksum: {}",
+                        return_init.window_size,
+                        return_init.packet_size,
+                        return_init.checksum_size
+                    ));
+                    let answer_packet_size = Packet::from(return_init).to_bin_buff(buffer.as_mut_slice(), config.min_checksum as usize);
+                    socket.send_to(&buffer[..answer_packet_size], received_from).expect("Can't answer with init packet after invalid size");
+                    config.vlog("Return init packet send back");
                 }
-                let prop = prop.unwrap();
-                // get packet
-                let packet = Packet::from_bin(&packet_content, prop.static_properties.checksum_size as usize);
-                match packet {
-                    Ok(Packet::End(packet)) => {
-                        if prop.parts_received.len() > 0 || prop.window_position != packet.header.seq {
-                            config.vlog("Attempt to end packet, that has some blocks not stored");
-                            let prop = properties.remove(&conn_id).expect("Can't remove connection properties for end packet with some data left");
-                            remove_connection(&prop, &config, &mut buffer, &socket, "end packet with some data left");
-                            continue;
-                        }
-                        prop.is_closed = true;
-                        let response_packet = Packet::from(EndPacket::new(conn_id, prop.window_position));
-                        let response_length = response_packet.to_bin_buff(&mut buffer, prop.static_properties.checksum_size as usize);
-                        socket.send_to(&buffer[..response_length], received_from).expect("Can't send end packet");
-                        config.vlog(&format!("End of connection {}", prop.static_properties.id));
-                    },
-                    Ok(_) => {
-                        config.vlog("Expected end packet but something different parsed");
-                        continue;
-                    }
-                    Err(e) => {
-                        config.vlog(&format!("Error parsing end packet {:?}", e));
-                        continue;
-                    }
-                };
+                // Other error
+                Err(e) => {
+                    config.vlog(&format!("Error parsing init packet {:?}", e));
+                }
+            };
+            continue;
+        }
+
+        // validate connection id and get the properties of the connection
+        let conn_id = header.id;
+        let prop = match properties.get_mut(&conn_id) {
+            Some(p) => p,
+            None => {
+                config.vlog(&format!("Received data packet for connection {}, but it doesn't exists", conn_id));
+                continue;
             }
         };
-    };
-}
+        // parse packet if possible
+        let packet = Packet::from_bin(&packet_content, prop.static_properties.checksum_size as usize);
+
+        // process the flag
+        match packet {
+            Err(ParsingError::InvalidFlag(f)) => {
+                config.vlog(&format!("Invalid flag {} received, ignoring packet", f));
+            }
+            Err(ParsingError::ChecksumNotMatch) => {
+                config.vlog("Checksum does not match, ignoring");
+            }
+            Err(ParsingError::InvalidSize(exp, act)) => {
+                config.vlog(&format!("Expected packet with size {}b, but only {}b received, ignoring", exp, act));
+            }
+
+            // data packet
+            Ok(Packet::Data(packet)) => {
+                config.vlog(&format!(
+                    "Data packet for {} with seq {} and {}b of data, window at {} with size {}",
+                    prop.static_properties.id,
+                    packet.header.seq,
+                    packet.data.len(),
+                    prop.window_position,
+                    prop.static_properties.window_size
+                ));
+                // make sure it is within window
+                if !prop.is_within_window(packet.header.seq, &config) {
+                    config.vlog("Data packed is not within window");
+                }
+                else {
+                    // store it into structure
+                    prop.store_data(&packet.data, packet.header.seq, &config);
+                    // save it into file
+                    prop.save_into_file(&config);
+                }
+                // return response
+                let ack = prop.get_acknowledge();
+                let packet = DataPacket::new_receiver(
+                    prop.static_properties.id,
+                    packet.header.seq,
+                    ack
+                );
+                config.vlog(&format!("Answer with ack {}", packet.header.ack));
+                let packet = Packet::from(packet);
+                let response_size = packet.to_bin_buff(&mut buffer, prop.static_properties.checksum_size as usize);
+                socket.send_to(&buffer[..response_size], received_from).expect("Can't respond to data packet");
+                config.vlog("Answer data packet send");
+            },
+
+            // error packet
+            Ok(Packet::Error(_)) => {
+                let prop = properties.remove(&conn_id).expect("Can't remove connection property");
+                remove_connection(&prop, &config, &mut buffer, &socket, "error packet");
+                println!("Error received in connection {}", prop.static_properties.id);
+            },
+
+            // end packet
+            Ok(Packet::End(packet)) => {
+                if prop.parts_received.len() > 0 || prop.window_position != packet.header.seq {
+                    config.vlog("Attempt to end packet, that has some blocks not stored");
+                    let prop = properties.remove(&conn_id).expect("Can't remove connection properties for end packet with some data left");
+                    remove_connection(&prop, &config, &mut buffer, &socket, "end packet with some data left");
+                    continue;
+                }
+                prop.is_closed = true;
+                let response_packet = Packet::from(EndPacket::new(conn_id, prop.window_position));
+                let response_length = response_packet.to_bin_buff(&mut buffer, prop.static_properties.checksum_size as usize);
+                socket.send_to(&buffer[..response_length], received_from).expect("Can't send end packet");
+                config.vlog(&format!("End of connection {}", prop.static_properties.id));
+            },
+
+            Ok(_) => {
+                config.vlog("Received unexpected packet, ignoring");
+            }
+        }; // end of packet match
+    }; // end of the main loop
+} // end of the receiver method
+
 
 fn remove_connection(
     prop: &ReceiverConnectionProperties,

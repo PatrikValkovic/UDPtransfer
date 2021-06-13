@@ -87,7 +87,7 @@ impl SenderConnectionProperties {
         for i in 0..min(self.static_properties.window_size, self.loaded_parts.len() as u16) {
             let current_index = Wrapping(self.window_position) + Wrapping(i);
             let part = self.loaded_parts.get_mut(&current_index.0).expect("Part is not within the map");
-            if part.send && Instant::now() - part.last_transition < Duration::from_millis(config.timeout() as u64){
+            if part.send && Instant::now() - part.last_transition < Duration::from_millis(config.timeout as u64){
                 continue;
             }
             config.vlog(&format!(

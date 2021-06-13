@@ -1,8 +1,6 @@
 use std::net::{SocketAddrV4};
 use std::str::FromStr;
 use argparse::{ArgumentParser, StoreTrue, Store};
-use time::OffsetDateTime;
-use crate::DATE_FORMAT_STR;
 use crate::loggable::Loggable;
 
 #[derive(Clone)]
@@ -48,23 +46,11 @@ impl Config {
         return SocketAddrV4::from_str(self.receiver_addr.as_str()).expect("Invalid address of the receiver");
     }
 
-    pub fn max_packet_size(&self) -> u32 {
-        return self.packet_size;
+    pub fn vlog(&self, text: &str){
+        Loggable::vlog(self, text)
     }
     pub fn is_verbose(&self) -> bool {
-        return self.verbose;
-    }
-    pub fn droprate(&self) -> f32 {
-        return self.drop_rate;
-    }
-    pub fn delay_mean(&self) -> f32 {
-        return self.delay_mean;
-    }
-    pub fn delay_std(&self) -> f32 {
-        return self.delay_std;
-    }
-    pub fn modify_prob(&self) -> f32 {
-        return self.modify_prob;
+        Loggable::is_verbose(self)
     }
 
     pub fn from_command_line() -> Self {
@@ -95,16 +81,10 @@ impl Config {
         }
         return config;
     }
-
-    pub fn vlog(&self, text: &str){
-        Loggable::vlog(self, text)
-    }
 }
 
 impl Loggable for Config {
-    fn vlog(&self, text: &str){
-        if self.is_verbose() {
-            println!("{}: {}", OffsetDateTime::now_utc().format(DATE_FORMAT_STR),text);
-        }
+    fn is_verbose(&self) -> bool {
+        self.verbose
     }
 }

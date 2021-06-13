@@ -1,9 +1,8 @@
 use std::net::SocketAddrV4;
 use std::str::FromStr;
 use argparse::{ArgumentParser, StoreTrue, Store};
-use time::OffsetDateTime;
-use crate::DATE_FORMAT_STR;
 use std::path::PathBuf;
+use crate::loggable::Loggable;
 
 pub struct Config {
     pub verbose: bool,
@@ -40,26 +39,11 @@ impl Config {
         return final_path;
     }
 
-    pub fn max_packet_size(&self) -> u16 {
-        return self.max_packet_size;
-    }
-    pub fn max_window_size(&self) -> u16 {
-        return self.max_window_size;
-    }
-    pub fn min_checksum_size(&self) -> u16 {
-        return self.min_checksum;
-    }
-    pub fn get_timeout(&self) -> u32 {
-        return self.timeout;
+    pub fn vlog(&self, text: &str) {
+        Loggable::vlog(self, &text)
     }
     pub fn is_verbose(&self) -> bool {
-        return self.verbose;
-    }
-
-    pub fn vlog(&self, text: &str){
-        if self.is_verbose() {
-            println!("{}: {}", OffsetDateTime::now_utc().format(DATE_FORMAT_STR),text);
-        }
+        Loggable::is_verbose(self)
     }
 
     pub fn from_command_line() -> Self {
@@ -86,3 +70,8 @@ impl Config {
     }
 }
 
+impl Loggable for Config {
+    fn is_verbose(&self) -> bool {
+        self.verbose
+    }
+}
