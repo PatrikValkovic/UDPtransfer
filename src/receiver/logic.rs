@@ -58,14 +58,12 @@ pub fn logic(config: Config) -> Result<(), String> {
         if let Err(e) = header_result {
             if config.is_verbose() {
                 let header_in_bin = &buffer[..PacketHeader::bin_size()];
-                let header_in_str: String = header_in_bin.iter()
-                    .map(|num| { format!("{:02x}", num) })
-                    .intersperse(String::from(""))
-                    .collect();
-                println!("Invalid header: {}; error: {:?}",
-                         header_in_str,
-                         e
+                let header_in_str = Itertools::intersperse(
+                    header_in_bin.iter().map(|num| { format!("{:02x}", num) }),
+                    String::from("")
                 );
+                let header_in_str: String = header_in_str.collect();
+                println!("Invalid header: {}; error: {:?}", header_in_str, e);
             }
             continue;
         }

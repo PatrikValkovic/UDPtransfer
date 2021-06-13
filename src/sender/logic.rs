@@ -1,6 +1,5 @@
 use std::cmp::{max, min};
 use std::fs::File;
-use std::io::ErrorKind;
 use std::net::{SocketAddr, UdpSocket};
 use std::result::Result::Ok;
 use std::time::Duration;
@@ -32,9 +31,9 @@ pub fn logic(config: Config) -> Result<(), String> {
                          props.static_properties.checksum_size));
 
     // send data
-    let send = send_data(&config, &mut input_file, &socket, &mut props)?;
+    send_data(&config, &mut input_file, &socket, &mut props)?;
 
-    send_end(config, socket, props)
+    send_end(&config, &socket, &mut props)
 }
 
 /// Connect to the receiver and agree on the connection properties.
@@ -127,36 +126,30 @@ fn send_data(
     config: &Config,
     mut input_file: &mut File,
     socket: &UdpSocket,
-    mut props: &mut SenderConnectionProperties
+    props: &mut SenderConnectionProperties
 ) -> Result<(), String> {
-    // load
-    props.load_window(&mut input_file, &config);
     // prepare variables
     let mut attempts = 0;
     let mut buffer = vec![0; BUFFER_SIZE];
     // process data
     while attempts < config.repetitions() && !props.is_complete() {
-        // send content from the window
+        // load data to fill rest of the window
         props.load_window(&mut input_file, &config);
+        // send data
         props.send_data(&socket, &config);
         // receive response
-        let content_result = socket.recv_from(&mut buffer);
+        let content_result = recv_with_timeout(&socket, &mut buffer, Box::new(config));
         // process errors for receive
-        if let Err(e) = content_result {
-            let kind = e.kind();
-            if kind == ErrorKind::TimedOut || kind == ErrorKind::WouldBlock {
-                config.vlog("Recv timeout");
-                attempts += 1;
-                config.vlog(&format!("Increased number of attempts to {}", attempts));
-                continue;
-            }
-            config.vlog(&format!("Recv error: {:?}", e));
-            return Err(String::from("Can't receive data"));
+        if let Err(_) = content_result {
+            attempts += 1;
+            config.vlog(&format!("Recv timeout, increased number of attempts to {}", attempts));
+            continue;
         }
+        // read received content
         let (recived_len, recived_from) = content_result.unwrap();
         config.vlog(&format!("Received {}b of data from {}", recived_len, recived_from));
-        // read content and validate it
         let packet = Packet::from_bin(&buffer[..recived_len], props.static_properties.checksum_size as usize);
+        // validate the packet
         let packet = match packet {
             Err(ParsingError::ChecksumNotMatch) => {
                 config.vlog("Invalid sum, ignoring");
@@ -172,12 +165,13 @@ fn send_data(
             },
             Ok(packet) => {
                 if packet.header().id != props.static_properties.id {
-                    config.vlog("Wrong connection ID");
+                    config.vlog("Wrong connection ID, ignoring");
                     continue;
                 }
                 packet
             }
         };
+        // process the packet
         match packet {
             Packet::Init(_) => {
                 config.vlog("Init packet received, but connection already established");
@@ -202,18 +196,20 @@ fn send_data(
             }
         };
     };
-
-    if attempts == config.repetitions() {
-        config.vlog(&format!("Connection lost after {} attempts", attempts));
-        return Err(format!("Connection lost after {} attemps", attempts));
+    // validate whether the loop does not end because of the timeout
+    if !props.is_complete() {
+        let e = format!("Connection lost after {} attempts", attempts);
+        config.vlog(&e);
+        return Err(e);
     }
+    // other end peacefully
     config.vlog("All data send");
     return Ok(());
 }
 
 /// Ends the connection after the file has been received.
 /// It sends data using `socket` and closes connection specified by `props`.
-fn send_end(config: Config, socket: UdpSocket, mut props: SenderConnectionProperties) -> Result<(), String> {
+fn send_end(config: &Config, socket: &UdpSocket, props: &mut SenderConnectionProperties) -> Result<(), String> {
     // creates variables
     let mut buffer = vec![0; BUFFER_SIZE];
     let packet = Packet::from(EndPacket::new(
@@ -228,7 +224,7 @@ fn send_end(config: Config, socket: UdpSocket, mut props: SenderConnectionProper
         socket.send_to(&buffer[..size], props.static_properties.socket_addr).expect("Can't send end packet");
         config.vlog("Send end packet");
         // receive response
-        let recv_result = recv_with_timeout(&socket, &mut buffer, Box::new(&config));
+        let recv_result = recv_with_timeout(&socket, &mut buffer, Box::new(config));
         if let Err(_) = recv_result {
             attempts += 1;
             continue;

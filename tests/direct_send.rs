@@ -51,7 +51,7 @@ fn direct_send(){
             packet_size: 1500,
             send_addr: String::from(RECEIVED_ADDR),
             window_size: 15,
-            timeout: 5000,
+            timeout: 100,
             repetition: 10,
             sum_size: 0
         };

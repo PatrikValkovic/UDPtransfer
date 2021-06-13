@@ -55,6 +55,7 @@ impl Packet {
         return ToBin::bin_size(self);
     }
 
+    #[allow(dead_code)]
     pub fn to_bin(&self, checksum: usize) -> Vec<u8> {
         let mut memory = vec![0; self.bin_size() + checksum];
         self.to_bin_buff(&mut memory, checksum);
