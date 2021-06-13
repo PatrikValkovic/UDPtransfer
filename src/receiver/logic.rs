@@ -12,6 +12,7 @@ use crate::connection_properties::ConnectionProperties;
 use crate::receiver::receiver_connection_properties::ReceiverConnectionProperties;
 use std::time::Duration;
 use std::path::Path;
+use crate::BUFFER_SIZE;
 
 pub fn logic(config: Config) -> Result<(), String> {
     let socket = UdpSocket::bind(config.binding()).expect("Can't bind socket");
@@ -22,7 +23,7 @@ pub fn logic(config: Config) -> Result<(), String> {
     let mut random_generator = rand::thread_rng();
     let mut properties = PropertiesMap::<u32, ReceiverConnectionProperties>::new();
 
-    let mut buffer = vec![0; 65535];
+    let mut buffer = vec![0; BUFFER_SIZE];
     loop {
         // filter timeouted connections
         // TODO use heap

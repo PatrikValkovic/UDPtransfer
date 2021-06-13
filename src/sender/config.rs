@@ -3,6 +3,7 @@ use std::str::FromStr;
 use argparse::{ArgumentParser, StoreTrue, Store};
 use time::OffsetDateTime;
 use crate::DATE_FORMAT_STR;
+use crate::loggable::Loggable;
 
 pub struct Config {
     pub verbose: bool,
@@ -62,9 +63,7 @@ impl Config {
     }
 
     pub fn vlog(&self, text: &str) {
-        if self.verbose {
-            println!("{}: {}", OffsetDateTime::now_utc().format(DATE_FORMAT_STR), text);
-        }
+        Loggable::vlog(self, &text)
     }
 
     pub fn from_command_line() -> Self {
@@ -96,3 +95,10 @@ impl Config {
     }
 }
 
+impl Loggable for Config {
+    fn vlog(&self, text: &str) {
+        if self.verbose {
+            println!("{}: {}", OffsetDateTime::now_utc().format(DATE_FORMAT_STR), text);
+        }
+    }
+}

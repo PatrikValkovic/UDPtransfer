@@ -8,7 +8,7 @@ use rand::{distributions::Uniform, Rng, thread_rng};
 use super::config::Config;
 use super::packet_wrapper::PacketWrapper;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::io::ErrorKind;
+use crate::{recv_with_timeout, BUFFER_SIZE};
 
 /// Creates the broker.
 /// `brk` parameter should be set to `true` when the broker should terminate.
@@ -105,7 +105,7 @@ fn receiving_part(
         .name(format!("{}_receive", thread_name))
         .spawn(move || {
             // create variables
-            let mut buff = vec![0; 65535];
+            let mut buff = vec![0; BUFFER_SIZE];
             let mut rand_gen = thread_rng();
             let probability_dist = Uniform::new(0.0, 1.0);
             let byte_dist = Uniform::new(0, 255);
@@ -115,18 +115,11 @@ fn receiving_part(
                 socket.set_read_timeout(Some(Duration::from_millis(1000)))
                       .expect("Can't change read timeout of the packet");
                 // receive packet
-                let (size, sender) = match socket.recv_from(buff.as_mut_slice()) {
-                    Ok(x) => x,
-                    Err(e) => {
-                        let kind = e.kind();
-                        if kind == ErrorKind::WouldBlock || kind == ErrorKind::TimedOut {
-                            continue;
-                        }
-                        config.vlog(&format!("Could not receive from socket {:?}, ignoring", socket.local_addr()));
-                        config.vlog(&format!("Error: {}", e.to_string()));
-                        continue;
-                    }
+                let recv = recv_with_timeout(&socket, &mut buff, Box::new(&config));
+                if let Err(_) = recv {
+                    continue;
                 };
+                let (size, sender) = recv.unwrap();
                 config.vlog(&format!("Received {}b of data from {}.", size, sender));
 
                 // drop packet if dropout
@@ -178,7 +171,6 @@ fn sending_part(
     let queue = queue.clone();
     let condvar = condvar.clone();
     let socket = socket.clone();
-    let tn = String::from(thread_name);
 
     thread::Builder::new()
         .name(String::from(format!("{}_send", thread_name)))
