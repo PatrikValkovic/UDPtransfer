@@ -78,7 +78,7 @@ fn with_change(){
     let st= sender::breakable_logic(sc, sender_brk);
 
     // wait for sender and kill receiver afterwards
-    st.join().unwrap();
+    st.join().unwrap().unwrap();
     broker_brk.store(true, Ordering::SeqCst);
     bt.join().unwrap();
     thread::sleep(Duration::from_secs(1));

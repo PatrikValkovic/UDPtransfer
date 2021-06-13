@@ -5,7 +5,6 @@ use rand::{Rng};
 use std::io::{Write, Read};
 use std::time::Duration;
 use itertools::zip;
-use std::thread::{JoinHandle};
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
@@ -14,7 +13,7 @@ fn more_senders(){
     const SOURCE_FILE: &str = "somefile.txt";
     const TARGET_DIR: &str = "received";
     const FILE_SIZE: usize = 2 * 1024 * 1024;
-    const RECEIVED_ADDR: &str = "127.0.0.1:3100";
+    const RECEIVER_ADDR: &str = "127.0.0.1:3100";
     const SENDER_ADDR: [&str; 3] = [
         "127.0.0.1:3401",
         "127.0.0.1:3402",
@@ -39,7 +38,7 @@ fn more_senders(){
     thread::Builder::new().name(String::from("Receiver")).spawn(|| {
         let rc = receiver::config::Config {
             verbose: false,
-            bindaddr: String::from(RECEIVED_ADDR),
+            bindaddr: String::from(RECEIVER_ADDR),
             directory: String::from(TARGET_DIR),
             max_packet_size: 1500,
             max_window_size: 15,
@@ -57,18 +56,18 @@ fn more_senders(){
             bind_addr: String::from(*addr),
             file: String::from(SOURCE_FILE),
             packet_size: 1500,
-            send_addr: String::from(BROKER_SEND_PART),
+            send_addr: String::from(RECEIVER_ADDR),
             window_size: 15,
             timeout: 100,
             repetition: 10,
             sum_size: 0
         };
         sender::breakable_logic(sc, sender_brk)
-    }).collect::<Vec<JoinHandle<()>>>();
+    }).collect::<Vec<_>>();
 
     // wait for sender and kill receiver afterwards
     for thread in senders_threads {
-        thread.join().unwrap();
+        thread.join().unwrap().unwrap();
     }
     thread::sleep(Duration::from_secs(1));
 

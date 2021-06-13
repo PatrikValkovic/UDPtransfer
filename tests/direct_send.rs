@@ -13,7 +13,7 @@ fn direct_send(){
     const SOURCE_FILE: &str = "somefile.txt";
     const TARGET_DIR: &str = "received";
     const FILE_SIZE: usize = 2 * 1024 * 1024;
-    const RECEIVED_ADDR: &str = "127.0.0.1:3100";
+    const RECEIVER_ADDR: &str = "127.0.0.1:3100";
     const SENDER_ADDR: &str = "127.0.0.1:3101";
 
     // create 2MB file and directory
@@ -34,7 +34,7 @@ fn direct_send(){
     thread::Builder::new().name(String::from("Receiver")).spawn(|| {
         let rc = receiver::config::Config {
             verbose: false,
-            bindaddr: String::from(RECEIVED_ADDR),
+            bindaddr: String::from(RECEIVER_ADDR),
             directory: String::from(TARGET_DIR),
             max_packet_size: 1500,
             max_window_size: 15,
@@ -51,7 +51,7 @@ fn direct_send(){
         bind_addr: String::from(SENDER_ADDR),
         file: String::from(SOURCE_FILE),
         packet_size: 1500,
-        send_addr: String::from(BROKER_SEND_PART),
+        send_addr: String::from(RECEIVER_ADDR),
         window_size: 15,
         timeout: 100,
         repetition: 10,
@@ -60,7 +60,7 @@ fn direct_send(){
     let st= sender::breakable_logic(sc, sender_brk);
 
     // wait for sender and kill receiver afterwards
-    st.join().unwrap();
+    st.join().unwrap().unwrap();
     thread::sleep(Duration::from_secs(1));
 
     // compare files
