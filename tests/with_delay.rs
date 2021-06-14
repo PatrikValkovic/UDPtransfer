@@ -1,9 +1,7 @@
 use udp_transfer::{receiver, sender, broker};
-use std::thread;
 use std::fs::{File, read_dir, remove_file, remove_dir_all, create_dir_all};
 use rand::{Rng};
 use std::io::{Write, Read};
-use std::time::Duration;
 use itertools::zip;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -33,18 +31,17 @@ fn with_delay(){
     }
 
     // create receiver
-    thread::Builder::new().name(String::from("Receiver")).spawn(|| {
-        let rc = receiver::config::Config {
-            verbose: false,
-            bindaddr: String::from(RECEIVED_ADDR),
-            directory: String::from(TARGET_DIR),
-            max_packet_size: 1500,
-            max_window_size: 15,
-            min_checksum: 0,
-            timeout: 10000
-        };
-        receiver::logic::logic(rc).unwrap();
-    }).unwrap();
+    let receiver_brk = Arc::new(AtomicBool::new(false));
+    let rc = receiver::config::Config {
+        verbose: false,
+        bindaddr: String::from(RECEIVED_ADDR),
+        directory: String::from(TARGET_DIR),
+        max_packet_size: 1500,
+        max_window_size: 15,
+        min_checksum: 0,
+        timeout: 10000
+    };
+    let rt = receiver::breakable_logic(rc, receiver_brk.clone());
 
     // create broker
     let broker_brk = Arc::new(AtomicBool::new(false));
@@ -77,11 +74,8 @@ fn with_delay(){
     };
     let st= sender::breakable_logic(sc, sender_brk);
 
-    // wait for sender and kill receiver afterwards
+    // wait for sender
     st.join().unwrap().unwrap();
-    broker_brk.store(true, Ordering::SeqCst);
-    bt.join().unwrap();
-    thread::sleep(Duration::from_secs(1));
 
     // compare files
     {
@@ -98,6 +92,12 @@ fn with_delay(){
             assert_eq!(o, r);
         }
     }
+
+    // end receiver and broker
+    receiver_brk.store(true, Ordering::SeqCst);
+    broker_brk.store(true, Ordering::SeqCst);
+    bt.join().unwrap();
+    rt.join().unwrap().unwrap();
 
     // delete files
     remove_file(SOURCE_FILE).unwrap();

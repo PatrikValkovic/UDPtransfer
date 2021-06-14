@@ -14,7 +14,7 @@ use std::thread;
 use std::thread::JoinHandle;
 
 /// Creates the sender.
-/// `brk` parameter should be set to `true` when the broker should terminate.
+/// `brk` parameter should be set to `true` when the sender should terminate.
 /// Returns handler to join the thread.
 pub fn breakable_logic(config: Config, brk: Arc<AtomicBool>) -> JoinHandle<Result<(), String>> {
     thread::Builder::new()

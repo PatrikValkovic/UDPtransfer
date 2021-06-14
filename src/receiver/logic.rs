@@ -12,8 +12,31 @@ use crate::receiver::receiver_connection_properties::ReceiverConnectionPropertie
 use std::time::Duration;
 use std::path::Path;
 use crate::{BUFFER_SIZE, recv_with_timeout};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread::JoinHandle;
+use std::thread;
 
+
+/// Creates the receiver.
+/// `brk` parameter should be set to `true` when the receiver should terminate.
+/// Returns handler to join the thread.
+pub fn breakable_logic(config: Config, brk: Arc<AtomicBool>) -> JoinHandle<Result<(), String>> {
+    thread::Builder::new()
+        .name(String::from("Receiver"))
+        .spawn(move || {
+            receiver(config, brk)
+        }).expect("Can't create thread for the broker")
+}
+
+/// Creates the receiver and keep running.
+/// There is no way how to terminate the execution.
 pub fn logic(config: Config) -> Result<(), String> {
+    let brk = Arc::new(AtomicBool::new(false));
+    receiver(config, brk)
+}
+
+fn receiver(config: Config, brk: Arc<AtomicBool>) -> Result<(), String> {
     // create socket
     let socket = UdpSocket::bind(config.binding()).expect("Can't bind socket");
     socket.set_read_timeout(Some(Duration::from_millis(config.timeout as u64))).expect("Can't set read timeout");
@@ -24,7 +47,7 @@ pub fn logic(config: Config) -> Result<(), String> {
     let mut properties = PropertiesMap::<u32, ReceiverConnectionProperties>::new();
     let mut buffer = vec![0; BUFFER_SIZE];
 
-    loop {
+    while !brk.load(Ordering::SeqCst) {
         // filter connections timeout
         // TODO use heap
         let ids_to_disconnect = properties.iter()
@@ -242,6 +265,7 @@ pub fn logic(config: Config) -> Result<(), String> {
             }
         }; // end of packet match
     }; // end of the main loop
+    return Ok(());
 } // end of the receiver method
 
 

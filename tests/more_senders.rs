@@ -1,12 +1,10 @@
 use udp_transfer::{receiver, sender};
-use std::thread;
 use std::fs::{File, read_dir, remove_file, remove_dir_all, create_dir_all};
 use rand::{Rng};
 use std::io::{Write, Read};
-use std::time::Duration;
 use itertools::zip;
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 #[test]
 fn more_senders(){
@@ -35,18 +33,17 @@ fn more_senders(){
     }
 
     // create receiver
-    thread::Builder::new().name(String::from("Receiver")).spawn(|| {
-        let rc = receiver::config::Config {
-            verbose: false,
-            bindaddr: String::from(RECEIVER_ADDR),
-            directory: String::from(TARGET_DIR),
-            max_packet_size: 1500,
-            max_window_size: 15,
-            min_checksum: 0,
-            timeout: 5000
-        };
-        receiver::logic::logic(rc).unwrap();
-    }).unwrap();
+    let receiver_brk = Arc::new(AtomicBool::new(false));
+    let rc = receiver::config::Config {
+        verbose: false,
+        bindaddr: String::from(RECEIVER_ADDR),
+        directory: String::from(TARGET_DIR),
+        max_packet_size: 1500,
+        max_window_size: 15,
+        min_checksum: 0,
+        timeout: 5000
+    };
+    let rt = receiver::breakable_logic(rc, receiver_brk.clone());
 
     // create senders
     let senders_threads = SENDER_ADDR.iter().map(|addr|{
@@ -65,11 +62,10 @@ fn more_senders(){
         sender::breakable_logic(sc, sender_brk)
     }).collect::<Vec<_>>();
 
-    // wait for sender and kill receiver afterwards
+    // wait for sender
     for thread in senders_threads {
         thread.join().unwrap().unwrap();
     }
-    thread::sleep(Duration::from_secs(1));
 
     // compare files
     {
@@ -88,6 +84,10 @@ fn more_senders(){
             }
         }
     }
+
+    // end receiver
+    receiver_brk.store(true, Ordering::SeqCst);
+    rt.join().unwrap().unwrap();
 
     // delete files
     remove_file(SOURCE_FILE).unwrap();
