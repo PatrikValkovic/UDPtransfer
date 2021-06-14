@@ -69,7 +69,7 @@ fn with_forced_change(){
         send_addr: String::from(BROKER_SEND_PART),
         window_size: 15,
         timeout: 100,
-        repetition: 10,
+        repetition: 100,
         checksum_size: 0
     };
     let st= sender::breakable_logic(sc, sender_brk);

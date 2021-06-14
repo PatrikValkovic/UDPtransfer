@@ -139,7 +139,7 @@ fn create_connection(
             }
             Err(e) => {
                 config.vlog(&format!("Packet can't be parsed: {:?}", e));
-                return Err(());
+                continue;
             }
         };
     }

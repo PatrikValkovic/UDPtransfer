@@ -65,12 +65,12 @@ fn everything(){
         verbose: false,
         bind_addr: String::from(SENDER_ADDR),
         file: String::from(SOURCE_FILE),
-        packet_size: 1500,
+        packet_size: 2000,
         send_addr: String::from(BROKER_SEND_PART),
-        window_size: 15,
+        window_size: 20,
         timeout: 100,
-        repetition: 10,
-        checksum_size: 0
+        repetition: 100,
+        checksum_size: 16,
     };
     let st= sender::breakable_logic(sc, sender_brk);
 

@@ -68,8 +68,8 @@ fn with_delay(){
         packet_size: 1500,
         send_addr: String::from(BROKER_SEND_PART),
         window_size: 15,
-        timeout: 100,
-        repetition: 10,
+        timeout: 200,
+        repetition: 100,
         checksum_size: 0
     };
     let st= sender::breakable_logic(sc, sender_brk);
