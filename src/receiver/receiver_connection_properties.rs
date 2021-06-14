@@ -14,7 +14,7 @@ pub struct ReceiverConnectionProperties {
     pub next_write_position: u16,
     pub parts_received: BTreeMap<u16, Vec<u8>>,
     pub last_receive_time: Instant,
-    pub is_closed: bool,
+    is_closed: bool,
     file: Option<File>,
 }
 
@@ -29,6 +29,15 @@ impl ReceiverConnectionProperties {
             is_closed: false,
             file: None,
         }
+    }
+
+    pub fn is_closed(&self) -> bool {
+        self.is_closed
+    }
+
+    pub fn close(&mut self) {
+        self.is_closed = true;
+        self.file.take();
     }
 
     pub fn timeouted(&self, timeout: u32) -> bool {
@@ -88,12 +97,16 @@ impl ReceiverConnectionProperties {
         let path_str = config.filename(self.static_properties.id);
         let path = Path::new(&path_str);
 
-        let mut file = OpenOptions::new().write(true)
-            .append(true)
-            .create(true)
-            .open(path).expect("Can't open file for write");
         while self.next_write_position != self.window_position {
             let buffer = self.parts_received.remove(&self.next_write_position).expect("Part to write is not within the map");
+            self.file = Some(match self.file.take() {
+                Some(f) => f,
+                None => OpenOptions::new().write(true)
+                                          .append(true)
+                                          .create(true)
+                                          .open(path).expect("Can't open file for write")
+            });
+            let file = self.file.as_mut().unwrap();
             let wrote = file.write(&buffer).expect("Can't write to the output file");
             config.vlog(&format!(
                "Connection {} wrote {}b into file for packet seq {}",

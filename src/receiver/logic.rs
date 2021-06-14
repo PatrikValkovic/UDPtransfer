@@ -55,8 +55,8 @@ fn receiver(config: Config, brk: Arc<AtomicBool>) -> Result<(), String> {
             .map(|(key,_)| *key)
             .collect_vec();
         for conn_id in ids_to_disconnect {
-            let prop = properties.remove(&conn_id).expect("Connection is not in properties");
-            remove_connection(&prop, &config, &mut buffer, &socket, "timeout");
+            let mut prop = properties.remove(&conn_id).expect("Connection is not in properties");
+            remove_connection(&mut prop, &config, &mut buffer, &socket, "timeout");
         }
         // receive from socket
         let result = recv_with_timeout(&socket, &mut buffer, Box::new(&config));
@@ -240,8 +240,8 @@ fn receiver(config: Config, brk: Arc<AtomicBool>) -> Result<(), String> {
 
             // error packet
             Ok(Packet::Error(_)) => {
-                let prop = properties.remove(&conn_id).expect("Can't remove connection property");
-                remove_connection(&prop, &config, &mut buffer, &socket, "error packet");
+                let mut prop = properties.remove(&conn_id).expect("Can't remove connection property");
+                remove_connection(&mut prop, &config, &mut buffer, &socket, "error packet");
                 println!("Error received in connection {}", prop.static_properties.id);
             },
 
@@ -249,11 +249,11 @@ fn receiver(config: Config, brk: Arc<AtomicBool>) -> Result<(), String> {
             Ok(Packet::End(packet)) => {
                 if prop.parts_received.len() > 0 || prop.window_position != packet.header.seq {
                     config.vlog("Attempt to end packet, that has some blocks not stored");
-                    let prop = properties.remove(&conn_id).expect("Can't remove connection properties for end packet with some data left");
-                    remove_connection(&prop, &config, &mut buffer, &socket, "end packet with some data left");
+                    let mut prop = properties.remove(&conn_id).expect("Can't remove connection properties for end packet with some data left");
+                    remove_connection(&mut prop, &config, &mut buffer, &socket, "end packet with some data left");
                     continue;
                 }
-                prop.is_closed = true;
+                prop.close();
                 let response_packet = Packet::from(EndPacket::new(conn_id, prop.window_position));
                 let response_length = response_packet.to_bin_buff(&mut buffer, prop.static_properties.checksum_size as usize);
                 socket.send_to(&buffer[..response_length], received_from).expect("Can't send end packet");
@@ -270,23 +270,26 @@ fn receiver(config: Config, brk: Arc<AtomicBool>) -> Result<(), String> {
 
 
 fn remove_connection(
-    prop: &ReceiverConnectionProperties,
+    prop: &mut ReceiverConnectionProperties,
     config: &Config,
     mut buffer: & mut Vec<u8>,
     socket: &UdpSocket,
     reason: &str,
 ) {
-    if prop.is_closed {
+    // if the connection end successfully and now the structure is just deleted
+    if prop.is_closed() {
         config.vlog(&format!("Connection {} definitely removed", prop.static_properties.id));
         return;
     }
-
+    // delete the temp file
+    prop.close();
     let filename = config.filename(prop.static_properties.id);
     let filepath = Path::new(&filename);
     if filepath.exists() {
         std::fs::remove_file(filepath).expect(&format!("Can't delete file for timeouted connection {}", prop.static_properties.id));
         config.vlog(&format!("Deleted file {}", filename));
     }
+    // send back the error packet
     config.vlog(&format!("Connection {} closed because of {}", prop.static_properties.id, reason));
     let err_packet = Packet::from(ErrorPacket::new(prop.static_properties.id));
     let bytes_to_write = err_packet.to_bin_buff(&mut buffer, prop.static_properties.checksum_size as usize);
