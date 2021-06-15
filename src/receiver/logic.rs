@@ -4,18 +4,17 @@ use std::cmp::{max, min};
 use std::collections::{HashMap as PropertiesMap};
 use rand::Rng;
 use itertools::Itertools;
-
-use super::config::Config;
-use crate::packet::{InitPacket, Packet, ParsingError, Flag, EndPacket, PacketHeader, ToBin, ErrorPacket, DataPacket};
-use crate::connection_properties::ConnectionProperties;
-use crate::receiver::receiver_connection_properties::ReceiverConnectionProperties;
 use std::time::Duration;
 use std::path::Path;
-use crate::{BUFFER_SIZE, recv_with_timeout};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::JoinHandle;
 use std::thread;
+use super::config::Config;
+use crate::packet::{InitPacket, Packet, ParsingError, Flag, EndPacket, PacketHeader, ToBin, ErrorPacket, DataPacket};
+use crate::connection_properties::ConnectionProperties;
+use crate::receiver::receiver_connection_properties::ReceiverConnectionProperties;
+use crate::{BUFFER_SIZE, recv_with_timeout};
 
 
 /// Creates the receiver.
