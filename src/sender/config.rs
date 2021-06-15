@@ -58,13 +58,13 @@ impl Config {
             parser.refer(&mut config.packet_size)
                 .add_option(&["--packet"], Store, "Maximum packet size");
             parser.refer(&mut config.send_addr)
-                .add_option(&["--addr"], Store, "Address to send data in format IP:port");
+                .add_option(&["--addr"], Store, "Address where send data in format IP:port");
             parser.refer(&mut config.window_size)
                 .add_option(&["-w", "--window"], Store, "Size of the window");
             parser.refer(&mut config.timeout)
-                .add_option(&["-t", "--timeout"], Store, "Timeout after starts to resend the data");
+                .add_option(&["-t", "--timeout"], Store, "Timeout after which resend the data");
             parser.refer(&mut config.repetition)
-                .add_option(&["-r", "--repetition"], Store, "How many times to resend packet");
+                .add_option(&["-r", "--repetition"], Store, "Maximum number of timeouts per packet");
             parser.refer(&mut config.checksum_size)
                 .add_option(&["-s", "--sum_size"], Store, "Size of the checksum");
             parser.parse_args_or_exit();
